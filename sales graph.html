@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <!-- Content Security Policy: 外部スクリプトを遮断し、フォントのみ許可した堅牢設計 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:;">
+  <meta name="referrer" content="no-referrer">
+  <title>売上推移</title>
+  <meta name="description" content="販売管理表Excelデータから日別の売上・客数・客単価を抽出し、3軸グラフおよび詳細テーブルを自動生成するラグジュアリー・ダークテーマWebツール">
+  
+  <!-- Google Fonts: Inter & Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ヘッダー (参照ファイルと同一レイアウト: タイトル + コンパクトなアップロード領域) -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand-title">
+        <div class="header-title-text">
+          <h1>売上推移</h1>
+        </div>
+      </div>
+
+      <!-- コンパクトなアップロードセクション (基準データ・比較日データの2ボタン配置) -->
+      <div class="upload-section">
+        <!-- 基準データ（昨年売上）アップロード -->
+        <div class="upload-group">
+          <label for="file-input-base" class="file-drop-zone drop-zone-base" id="drop-zone-base" role="button" tabindex="0" aria-label="基準データ(昨年売上)をアップロード">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round" class="icon-base">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <p>基準データアップロード</p>
+          </label>
+          <input type="file" id="file-input-base" accept=".xlsx, .xls" style="display: none;" aria-label="基準データExcelファイル選択">
+          <span id="file-name-base" class="file-pill pill-base hidden">基準: 未読込</span>
+        </div>
+
+        <!-- 比較日データ（今期売上）アップロード -->
+        <div class="upload-group">
+          <label for="file-input-compare" class="file-drop-zone drop-zone-compare" id="drop-zone-compare" role="button" tabindex="0" aria-label="比較日データ(今期売上)をアップロード">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round" class="icon-compare">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <p>比較日データアップロード</p>
+          </label>
+          <input type="file" id="file-input-compare" accept=".xlsx, .xls" style="display: none;" aria-label="比較日データExcelファイル選択">
+          <span id="file-name-compare" class="file-pill pill-compare hidden">比較: 未読込</span>
+        </div>
+
+        <!-- 対比方式切り替え (同日対比 / 同曜日対比) -->
+        <div class="mode-toggle-group" role="group" aria-label="対比方式切り替え">
+          <button type="button" id="btn-mode-date" class="btn-mode active" title="日付同士で対比します (例: 9/1 vs 9/1)">
+            同日対比
+          </button>
+          <button type="button" id="btn-mode-weekday" class="btn-mode" title="同じ曜日同士で対比します (例: 9/1(火) vs 9/2(火))">
+            同曜日対比
+          </button>
+        </div>
+
+        <button type="button" id="btn-export-png" class="btn btn-accent" title="現在のグラフを高解像度PNG画像として保存します">
+          💾 グラフをPNG保存
+        </button>
+        <button type="button" id="btn-toggle-table" class="btn btn-secondary">
+          データ一覧を表示 ▼
+        </button>
+        <button type="button" id="btn-reset-data" class="btn btn-secondary btn-reset" title="読み込んだデータをリセットして初期状態に戻します">
+          🔄 リセット
+        </button>
+        <button type="button" id="btn-theme-toggle" class="btn btn-theme" aria-label="テーマ切り替え" title="ダークモードとライトモードを切り替えます">
+          <svg class="theme-icon icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+          <svg class="theme-icon icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+          <span id="theme-text">dark mode</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- メインコンテンツ -->
+  <main class="app-container">
+
+    <!-- ステータスメッセージ領域 -->
+    <div id="status-message" class="status-banner hidden" role="status" aria-live="polite"></div>
+
+    <!-- KPIサマリーカード -->
+    <section class="kpi-grid" aria-label="主要実績サマリー">
+      <div class="kpi-card sales">
+        <div class="kpi-title">合計売上高</div>
+        <div id="kpi-total-sales" class="kpi-value">-</div>
+        <div id="kpi-total-sales-sub" class="kpi-subtext">期間内の総売上実績</div>
+      </div>
+
+      <div class="kpi-card count">
+        <div class="kpi-title">総来客数</div>
+        <div id="kpi-total-customers" class="kpi-value">-</div>
+        <div id="kpi-total-customers-sub" class="kpi-subtext">期間内の合計客数</div>
+      </div>
+
+      <div class="kpi-card price">
+        <div class="kpi-title">平均客単価</div>
+        <div id="kpi-avg-price" class="kpi-value">-</div>
+        <div id="kpi-avg-price-sub" class="kpi-subtext">総売上 ÷ 総来客数</div>
+      </div>
+
+      <div class="kpi-card days">
+        <div class="kpi-title">営業日数 / 日平均売上</div>
+        <div id="kpi-avg-daily-sales" class="kpi-value">-</div>
+        <div id="kpi-active-days" class="kpi-subtext">未解析</div>
+      </div>
+    </section>
+
+    <!-- グラフ表示カード -->
+    <section class="chart-card" aria-label="売上・客数・客単価 3軸推移グラフ">
+      <div class="chart-card-header">
+        <h3 id="chart-main-title">日別 売上実績・客数・客単価推移 (全店)</h3>
+      </div>
+      <div class="chart-wrapper">
+        <div id="chart-placeholder" class="chart-placeholder">
+          <div class="placeholder-icon">📊</div>
+          <p class="placeholder-text">Excelファイルを選択するとグラフが表示されます</p>
+          <p class="placeholder-subtext">右上の「基準データアップロード」「比較日データアップロード」からファイルを選択またはドロップしてください</p>
+        </div>
+        <canvas id="sales-chart-canvas" role="img" aria-label="日別売上実績・客数・客単価の3軸対比グラフ" class="hidden"></canvas>
+      </div>
+    </section>
+
+    <!-- データ詳細テーブル (初期非表示) -->
+    <section id="table-container" class="table-card hidden" aria-label="日別データ一覧表">
+      <div class="table-header-bar">
+        <div id="table-main-title" class="table-title">📊 日別データ一覧</div>
+      </div>
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr id="table-header-row">
+              <th class="text-center">日付</th>
+              <th class="text-right">今期売上 (円)</th>
+              <th class="text-right">昨年売上 (円)</th>
+              <th class="text-right">売上前年比</th>
+              <th class="text-right">今期客数 (人)</th>
+              <th class="text-right">昨年客数 (人)</th>
+              <th class="text-right">客数前年比</th>
+              <th class="text-right">今期単価 (円)</th>
+              <th class="text-right">昨年単価 (円)</th>
+              <th class="text-right">客単価前年比</th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <!-- JavaScript (DOM API) により安全に挿入されます -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- スクリプト読み込み (完全ローカル完結・厳格な実行順序) -->
+  <script src="vendor/xlsx.full.min.js"></script>
+  <script src="vendor/chart.umd.min.js"></script>
+  <script src="js/parser.js"></script>
+  <script src="js/chart.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
