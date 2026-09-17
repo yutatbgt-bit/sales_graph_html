@@ -29,6 +29,9 @@
     // テーマ初期化
     initTheme();
 
+    // 全画面表示の初期化
+    initFullscreen();
+
     // テーマ切り替えボタン
     const btnThemeToggle = document.getElementById('btn-theme-toggle');
     if (btnThemeToggle) {
@@ -895,6 +898,52 @@
   }
 
   /**
+   * 全画面表示切り替え機能の初期化
+   */
+  function initFullscreen() {
+    const fullscreenBtn = document.getElementById('btn-fullscreen');
+    if (!fullscreenBtn) return;
+
+    fullscreenBtn.addEventListener('click', function() {
+      const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      if (!isFullscreen) {
+        const docEl = document.documentElement;
+        if (docEl.requestFullscreen) {
+          docEl.requestFullscreen().catch(function(err) {
+            showStatusMessage('全画面表示への切り替えに失敗しました: ' + err.message, 'error');
+          });
+        } else if (docEl.webkitRequestFullscreen) {
+          docEl.webkitRequestFullscreen();
+        }
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen().catch(function(err) {
+            showStatusMessage('全画面表示の解除に失敗しました: ' + err.message, 'error');
+          });
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen();
+        }
+      }
+    });
+
+    function handleFullscreenChange() {
+      const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      if (isFs) {
+        fullscreenBtn.setAttribute('title', '全画面表示を解除します');
+        fullscreenBtn.setAttribute('aria-label', '全画面表示を解除');
+        fullscreenBtn.setAttribute('aria-pressed', 'true');
+      } else {
+        fullscreenBtn.setAttribute('title', '全画面表示に切り替えます');
+        fullscreenBtn.setAttribute('aria-label', '全画面表示に切り替え');
+        fullscreenBtn.setAttribute('aria-pressed', 'false');
+      }
+    }
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+  }
+
+  /**
    * テーマ初期化 (localStorageのホワイトリスト読み込み)
    */
   function initTheme() {
@@ -933,6 +982,19 @@
   function applyTheme(theme, shouldRerenderChart) {
     currentTheme = theme === 'light' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', currentTheme);
+
+    const themeBtn = document.getElementById('btn-theme-toggle');
+    if (themeBtn) {
+      if (currentTheme === 'light') {
+        themeBtn.setAttribute('title', 'ダークモードに切り替えます');
+        themeBtn.setAttribute('aria-label', 'ダークモードに切り替え');
+        themeBtn.setAttribute('aria-pressed', 'true');
+      } else {
+        themeBtn.setAttribute('title', 'ライトモードに切り替えます');
+        themeBtn.setAttribute('aria-label', 'ライトモードに切り替え');
+        themeBtn.setAttribute('aria-pressed', 'false');
+      }
+    }
 
     const themeText = document.getElementById('theme-text');
     if (themeText) {

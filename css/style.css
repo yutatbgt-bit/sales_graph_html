@@ -390,63 +390,6 @@ body {
   background: rgba(225, 29, 72, 0.12);
 }
 
-/* データリセットボタン */
-.btn-reset {
-  color: var(--text-muted);
-}
-
-.btn-reset:hover {
-  color: var(--accent-red);
-  border-color: rgba(248, 113, 113, 0.4);
-  background: rgba(248, 113, 113, 0.08);
-}
-
-:root[data-theme="light"] .btn-reset:hover {
-  color: #e11d48;
-  border-color: rgba(225, 29, 72, 0.4);
-  background: rgba(225, 29, 72, 0.08);
-}
-
-.btn-theme {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: var(--card-border);
-  color: var(--text-main);
-  padding: 10px 14px;
-}
-
-.btn-theme:hover {
-  background: var(--primary-glow);
-  border-color: var(--primary);
-  color: var(--primary);
-}
-
-.theme-icon {
-  width: 16px;
-  height: 16px;
-  display: inline-block;
-  vertical-align: middle;
-  flex-shrink: 0;
-  stroke: currentColor;
-}
-
-:root .icon-sun {
-  display: none;
-}
-
-:root .icon-moon {
-  display: inline-block;
-  color: var(--primary);
-}
-
-:root[data-theme="light"] .icon-moon {
-  display: none;
-}
-
-:root[data-theme="light"] .icon-sun {
-  display: inline-block;
-  color: var(--primary);
-}
-
 :root[data-theme="light"] .btn-secondary {
   background: rgba(0, 0, 0, 0.04);
   color: #334155;
@@ -458,16 +401,132 @@ body {
   color: #0f172a;
 }
 
-:root[data-theme="light"] .btn-theme {
+/* ==========================================================================
+   Header Action Icon Buttons (文字非表示・アイコン統一設計)
+   ========================================================================== */
+
+.header-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--card-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.header-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--primary);
+  color: var(--text-main);
+  transform: translateY(-1px);
+}
+
+.header-icon-btn:active {
+  transform: translateY(0);
+}
+
+.header-icon-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+:root[data-theme="light"] .header-icon-btn {
   background: rgba(0, 0, 0, 0.04);
-  color: #334155;
   border-color: #cbd5e1;
 }
 
-:root[data-theme="light"] .btn-theme:hover {
+:root[data-theme="light"] .header-icon-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  border-color: var(--primary);
+}
+
+/* データリセットボタン（警告ホバー） */
+.btn-reset-data {
+  color: var(--text-muted);
+}
+
+.btn-reset-data:hover {
+  background: rgba(248, 113, 113, 0.12) !important;
+  border-color: var(--accent-red) !important;
+  color: var(--accent-red) !important;
+  box-shadow: 0 0 12px rgba(248, 113, 113, 0.25);
+}
+
+:root[data-theme="light"] .btn-reset-data:hover {
+  background: rgba(225, 29, 72, 0.1) !important;
+  border-color: var(--accent-red) !important;
+  color: var(--accent-red) !important;
+}
+
+/* 全画面表示切り替えボタン */
+.btn-fullscreen-toggle {
+  color: var(--text-main);
+}
+
+.fullscreen-icon-container {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-maximize {
+  display: block;
+}
+
+.icon-minimize {
+  display: none;
+}
+
+:fullscreen .icon-maximize,
+:-webkit-full-screen .icon-maximize {
+  display: none;
+}
+
+:fullscreen .icon-minimize,
+:-webkit-full-screen .icon-minimize {
+  display: block;
+}
+
+:fullscreen .btn-fullscreen-toggle,
+:-webkit-full-screen .btn-fullscreen-toggle {
   background: var(--primary-glow);
   border-color: var(--primary);
   color: var(--primary);
+}
+
+/* テーマ切り替えボタン */
+.btn-theme-toggle {
+  color: var(--text-main);
+}
+
+.theme-icon-container {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.theme-icon-container .icon-sun {
+  display: block;
+}
+
+.theme-icon-container .icon-moon {
+  display: none;
+}
+
+:root[data-theme="light"] .theme-icon-container .icon-sun {
+  display: none;
+}
+
+:root[data-theme="light"] .theme-icon-container .icon-moon {
+  display: block;
 }
 
 /* ==========================================================================
