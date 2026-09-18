@@ -58,9 +58,10 @@
       });
     }
 
-    // 両方のデータが存在し、今期が月途中の場合は、今期実績の同日数分（例: 14日分）に対比範囲を限定
+        // 基準データが存在する場合は、ベースとして基準データの月末(最大日数)までを描画する
     let targetDisplayDays = maxDay;
-    if (hasCurrent && hasBase && maxCurActiveDay > 0) {
+    if (!hasBase && hasCurrent && maxCurActiveDay > 0) {
+      // 基準データが無く今期のみの場合は、今期実績のある日までを描画
       targetDisplayDays = maxCurActiveDay;
     } else if (hasCurrent && maxCurActiveDay > 0) {
       targetDisplayDays = maxCurActiveDay;
