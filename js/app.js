@@ -941,7 +941,19 @@
       if (mode === 'weekday' && baseItem) {
         tdBaseCount.title = '対比対象(昨年): ' + pair.baseLabel;
       }
-      tr.appendChild(tdBaseCount);
+              tr.appendChild(tdBaseCount);
+
+        // 客数差分
+        const tdCountDiff = document.createElement('td');
+        if (curCount > 0 && baseCount > 0) {
+          const countDiffVal = curCount - baseCount;
+          tdCountDiff.textContent = (countDiffVal > 0 ? '+' : '') + countDiffVal.toLocaleString() + ' 人';
+          tdCountDiff.className = 'text-right ' + (countDiffVal >= 0 ? 'text-diff-up' : 'text-diff-down');
+        } else {
+          tdCountDiff.textContent = '-';
+          tdCountDiff.className = 'text-right text-diff-neutral';
+        }
+        tr.appendChild(tdCountDiff);
 
       // 客数前年比
       const tdCountRatio = document.createElement('td');
@@ -970,7 +982,19 @@
       if (mode === 'weekday' && baseItem) {
         tdBasePrice.title = '対比対象(昨年): ' + pair.baseLabel;
       }
-      tr.appendChild(tdBasePrice);
+              tr.appendChild(tdBasePrice);
+
+        // 単価差分
+        const tdPriceDiff = document.createElement('td');
+        if (curPrice > 0 && basePrice > 0) {
+          const priceDiffVal = curPrice - basePrice;
+          tdPriceDiff.textContent = (priceDiffVal > 0 ? '+¥' : '-¥') + Math.abs(priceDiffVal).toLocaleString();
+          tdPriceDiff.className = 'text-right ' + (priceDiffVal >= 0 ? 'text-diff-up' : 'text-diff-down');
+        } else {
+          tdPriceDiff.textContent = '-';
+          tdPriceDiff.className = 'text-right text-diff-neutral';
+        }
+        tr.appendChild(tdPriceDiff);
 
       // 客単価前年比
       const tdPriceRatio = document.createElement('td');
