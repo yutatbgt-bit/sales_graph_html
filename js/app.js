@@ -10,6 +10,86 @@
   'use strict';
 
   // 許容最大ファイルサイズ (20MB)
+  
+  // ==========================================================================
+  // ハイブリッド・ストレージマネージャー (IndexedDB + localStorage フォールバック)
+  // ==========================================================================
+  const AppStorage = (function() {
+    const DB_NAME = 'SalesGraphAppDB';
+    const DB_VERSION = 1;
+    const STORE_NAME = 'graph_store';
+
+    function openDB() {
+      return new Promise(function(resolve, reject) {
+        if (!window.indexedDB) {
+          return reject(new Error('IndexedDB not supported'));
+        }
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = function(e) {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME);
+          }
+        };
+        req.onsuccess = function(e) { resolve(e.target.result); };
+        req.onerror = function(e) { reject(e.target.error); };
+      });
+    }
+
+    return {
+      get: function(key) {
+        return openDB().then(function(db) {
+          return new Promise(function(resolve, reject) {
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const store = tx.objectStore(STORE_NAME);
+            const req = store.get(key);
+            req.onsuccess = function() { resolve(req.result); };
+            req.onerror = function() { reject(req.error); };
+          });
+        }).catch(function() {
+          try {
+            const raw = localStorage.getItem('sg_' + key);
+            return raw ? JSON.parse(raw) : null;
+          } catch (e) {
+            return null;
+          }
+        });
+      },
+      set: function(key, val) {
+        return openDB().then(function(db) {
+          return new Promise(function(resolve, reject) {
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            const req = store.put(val, key);
+            req.onsuccess = function() { resolve(); };
+            req.onerror = function() { reject(req.error); };
+          });
+        }).catch(function() {
+          try {
+            localStorage.setItem('sg_' + key, JSON.stringify(val));
+          } catch (e) {
+            console.warn('[AppStorage] localStorage set failed:', e);
+          }
+        });
+      },
+      clearAll: function() {
+        return openDB().then(function(db) {
+          return new Promise(function(resolve, reject) {
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            const req = store.clear();
+            req.onsuccess = function() { resolve(); };
+            req.onerror = function() { reject(req.error); };
+          });
+        }).catch(function() {
+          try {
+            localStorage.removeItem('sg_app_state');
+          } catch (e) {}
+        });
+      }
+    };
+  })();
+
   const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 
   // アプリケーション状態
@@ -24,6 +104,33 @@
   document.addEventListener('DOMContentLoaded', function() {
     initApp();
   });
+
+  
+  /**
+   * 起動時に保存済みデータを復元
+   */
+  function restorePersistedData() {
+    AppStorage.get('app_state').then(function(state) {
+      if (!state) return;
+      let restored = false;
+      if (state.baseDataSet) {
+        baseDataSet = state.baseDataSet;
+        baseFileName = state.baseFileName || '';
+        restored = true;
+      }
+      if (state.compareDataSet) {
+        compareDataSet = state.compareDataSet;
+        compareFileName = state.compareFileName || '';
+        restored = true;
+      }
+      if (restored) {
+        updateDashboardView();
+        showStatusMessage('前回保存された売上データを自動復元しました。', 'info');
+      }
+    }).catch(function(err) {
+      console.warn('[restorePersistedData] error:', err);
+    });
+  }
 
   function initApp() {
     // テーマ初期化
@@ -122,6 +229,9 @@
         resetAllData();
       });
     }
+
+    // 起動時に保存済みデータを復元
+    restorePersistedData();
   }
 
   /**
@@ -239,6 +349,15 @@
 
         updateDashboardView();
 
+        // ストレージへ非同期永続化保存
+        AppStorage.set('app_state', {
+          baseDataSet: baseDataSet,
+          baseFileName: baseFileName,
+          compareDataSet: compareDataSet,
+          compareFileName: compareFileName,
+          savedAt: Date.now()
+        });
+
         const periodText = parsed.periodInfo && parsed.periodInfo.label ? ' (' + parsed.periodInfo.label + ')' : '';
         if (swapped) {
           showStatusMessage('期間の古いデータを「基準データ(昨年)」、新しいデータを「今期データ」として自動整列しました。', 'success');
@@ -265,6 +384,9 @@
     compareDataSet = null;
     baseFileName = '';
     compareFileName = '';
+
+    // ストレージから永続化データを完全消去
+    AppStorage.clearAll();
 
     // ファイル入力要素のリセット
     const inputBase = document.getElementById('file-input-base');
