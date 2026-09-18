@@ -58,14 +58,12 @@
       });
     }
 
-        // 基準データが存在する場合は、ベースとして基準データの月末(最大日数)までを描画する
-    let targetDisplayDays = maxDay;
-    if (!hasBase && hasCurrent && maxCurActiveDay > 0) {
-      // 基準データが無く今期のみの場合は、今期実績のある日までを描画
-      targetDisplayDays = maxCurActiveDay;
-    } else if (hasCurrent && maxCurActiveDay > 0) {
-      targetDisplayDays = maxCurActiveDay;
-    }
+              // 基準データが存在する場合は、ベースとして基準データの月末(最大日数)までを描画する
+      let targetDisplayDays = maxDay;
+      if (!hasBase && hasCurrent && maxCurActiveDay > 0) {
+        // 基準データが無く今期のみの場合は、今期実績のある日までを描画
+        targetDisplayDays = maxCurActiveDay;
+      }
 
     // 曜日対比の可否チェック (双方がdayOfWeekを持つか)
     const canWeekday = mode === 'weekday' && hasCurrent && hasBase &&
