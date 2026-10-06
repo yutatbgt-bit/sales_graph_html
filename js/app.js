@@ -865,6 +865,159 @@
 
     if (!Array.isArray(pairs) || pairs.length === 0) return;
 
+    let sumCurSales = 0, sumBaseSales = 0;
+    let sumCurCount = 0, sumBaseCount = 0;
+
+    pairs.forEach(function(pair) {
+      const curItem = pair.curItem;
+      const baseItem = pair.baseItem;
+      const curSales = curItem ? (curItem['売上'] || 0) : 0;
+      const baseSales = baseItem ? (baseItem['売上'] || 0) : 0;
+      const curCount = curItem ? (curItem['客数'] || 0) : 0;
+      const baseCount = baseItem ? (baseItem['客数'] || 0) : 0;
+
+      // 今期実績が存在する日（過日）のみを合計対象とする
+      if (curSales > 0 || curCount > 0) {
+        sumCurSales += curSales;
+        sumBaseSales += baseSales;
+        sumCurCount += curCount;
+        sumBaseCount += baseCount;
+      }
+    });
+
+    const sumCurPrice = sumCurCount > 0 ? Math.round(sumCurSales / sumCurCount) : 0;
+    const sumBasePrice = sumBaseCount > 0 ? Math.round(sumBaseSales / sumBaseCount) : 0;
+
+    const trTotal = document.createElement('tr');
+    trTotal.style.backgroundColor = 'var(--table-hover)';
+    trTotal.style.borderBottom = '2px solid var(--card-border)';
+
+    const tdTotalLabel = document.createElement('td');
+    tdTotalLabel.className = 'text-center font-bold';
+    tdTotalLabel.style.fontWeight = 'bold';
+    tdTotalLabel.textContent = '合計';
+    trTotal.appendChild(tdTotalLabel);
+
+    const tdTotalCurSales = document.createElement('td');
+    tdTotalCurSales.className = 'text-right font-bold color-sales';
+    tdTotalCurSales.style.fontWeight = 'bold';
+    tdTotalCurSales.textContent = sumCurSales > 0 ? '¥' + sumCurSales.toLocaleString() : '-';
+    trTotal.appendChild(tdTotalCurSales);
+
+    const tdTotalBaseSales = document.createElement('td');
+    tdTotalBaseSales.className = 'text-right font-bold text-muted-val';
+    tdTotalBaseSales.style.fontWeight = 'bold';
+    tdTotalBaseSales.textContent = sumBaseSales > 0 ? '¥' + sumBaseSales.toLocaleString() : '-';
+    trTotal.appendChild(tdTotalBaseSales);
+
+    const tdTotalSalesRatio = document.createElement('td');
+    if (sumCurSales > 0 && sumBaseSales > 0) {
+      const ratio = ((sumCurSales / sumBaseSales) * 100).toFixed(1);
+      tdTotalSalesRatio.textContent = ratio + '%';
+      tdTotalSalesRatio.className = 'text-right font-bold ' + (sumCurSales >= sumBaseSales ? 'text-diff-up' : 'text-diff-down');
+    } else {
+      tdTotalSalesRatio.textContent = '-';
+      tdTotalSalesRatio.className = 'text-right font-bold text-diff-neutral';
+    }
+    tdTotalSalesRatio.style.fontWeight = 'bold';
+    trTotal.appendChild(tdTotalSalesRatio);
+
+    const tdTotalCurCount = document.createElement('td');
+    tdTotalCurCount.className = 'text-right font-bold color-count';
+    tdTotalCurCount.style.fontWeight = 'bold';
+    tdTotalCurCount.textContent = sumCurCount > 0 ? sumCurCount.toLocaleString() + ' 人' : '-';
+    trTotal.appendChild(tdTotalCurCount);
+
+    const tdTotalBaseCount = document.createElement('td');
+    tdTotalBaseCount.className = 'text-right font-bold text-muted-val';
+    tdTotalBaseCount.style.fontWeight = 'bold';
+    tdTotalBaseCount.textContent = sumBaseCount > 0 ? sumBaseCount.toLocaleString() + ' 人' : '-';
+    trTotal.appendChild(tdTotalBaseCount);
+
+    const tdTotalCountDiff = document.createElement('td');
+    if (sumCurCount > 0 && sumBaseCount > 0) {
+      const diff = sumCurCount - sumBaseCount;
+      tdTotalCountDiff.textContent = (diff > 0 ? '+' : '') + diff.toLocaleString() + ' 人';
+      tdTotalCountDiff.className = 'text-right font-bold ' + (diff >= 0 ? 'text-diff-up' : 'text-diff-down');
+    } else {
+      tdTotalCountDiff.textContent = '-';
+      tdTotalCountDiff.className = 'text-right font-bold text-diff-neutral';
+    }
+    tdTotalCountDiff.style.fontWeight = 'bold';
+    trTotal.appendChild(tdTotalCountDiff);
+
+    const tdTotalCountRatio = document.createElement('td');
+    if (sumCurCount > 0 && sumBaseCount > 0) {
+      const ratio = ((sumCurCount / sumBaseCount) * 100).toFixed(1);
+      tdTotalCountRatio.textContent = ratio + '%';
+      tdTotalCountRatio.className = 'text-right font-bold ' + (sumCurCount >= sumBaseCount ? 'text-diff-up' : 'text-diff-down');
+    } else {
+      tdTotalCountRatio.textContent = '-';
+      tdTotalCountRatio.className = 'text-right font-bold text-diff-neutral';
+    }
+    tdTotalCountRatio.style.fontWeight = 'bold';
+    trTotal.appendChild(tdTotalCountRatio);
+
+    const tdTotalCurPrice = document.createElement('td');
+    tdTotalCurPrice.className = 'text-right font-bold color-price';
+    tdTotalCurPrice.style.fontWeight = 'bold';
+    tdTotalCurPrice.textContent = sumCurPrice > 0 ? '¥' + sumCurPrice.toLocaleString() : '-';
+    trTotal.appendChild(tdTotalCurPrice);
+
+    const tdTotalBasePrice = document.createElement('td');
+    tdTotalBasePrice.className = 'text-right font-bold text-muted-val';
+    tdTotalBasePrice.style.fontWeight = 'bold';
+    tdTotalBasePrice.textContent = sumBasePrice > 0 ? '¥' + sumBasePrice.toLocaleString() : '-';
+    trTotal.appendChild(tdTotalBasePrice);
+
+    const tdTotalPriceDiff = document.createElement('td');
+    if (sumCurPrice > 0 && sumBasePrice > 0) {
+      const diff = sumCurPrice - sumBasePrice;
+      tdTotalPriceDiff.textContent = (diff > 0 ? '+¥' : '-¥') + Math.abs(diff).toLocaleString();
+      tdTotalPriceDiff.className = 'text-right font-bold ' + (diff >= 0 ? 'text-diff-up' : 'text-diff-down');
+    } else {
+      tdTotalPriceDiff.textContent = '-';
+      tdTotalPriceDiff.className = 'text-right font-bold text-diff-neutral';
+    }
+    tdTotalPriceDiff.style.fontWeight = 'bold';
+    trTotal.appendChild(tdTotalPriceDiff);
+
+    const tdTotalPriceRatio = document.createElement('td');
+    if (sumCurPrice > 0 && sumBasePrice > 0) {
+      const ratio = ((sumCurPrice / sumBasePrice) * 100).toFixed(1);
+      tdTotalPriceRatio.textContent = ratio + '%';
+      tdTotalPriceRatio.className = 'text-right font-bold ' + (sumCurPrice >= sumBasePrice ? 'text-diff-up' : 'text-diff-down');
+    } else {
+      tdTotalPriceRatio.textContent = '-';
+      tdTotalPriceRatio.className = 'text-right font-bold text-diff-neutral';
+    }
+    tdTotalPriceRatio.style.fontWeight = 'bold';
+    trTotal.appendChild(tdTotalPriceRatio);
+
+    tbody.appendChild(trTotal);
+
+    // ヘッダー行の高さを明示的に固定し、透過ボーダーによる文字透けを完全に防ぐ
+    const theadRow = document.getElementById('table-header-row');
+    if (theadRow) {
+      Array.from(theadRow.children).forEach(th => {
+        th.style.height = '46px';
+        th.style.boxSizing = 'border-box';
+        // 透過ボーダーを無くし、内側への影(inset)でボーダーを描画することで裏透けを物理的に遮断
+        th.style.borderBottom = 'none';
+        th.style.boxShadow = 'inset 0 -2px 0 0 var(--card-border)';
+      });
+    }
+
+    // 合計行をスクロール時にカラム行の直下に完全に固定する設定
+    Array.from(trTotal.children).forEach(function(td) {
+      td.style.position = 'sticky';
+      td.style.top = '46px'; // ヘッダーの固定高さと完全に一致させる（ジャンプ防止）
+      td.style.zIndex = '9'; // ヘッダー(10)の下、通常セルより上
+      td.style.backgroundColor = 'var(--table-th-bg)'; // 透けないようにヘッダーと同色
+      td.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15)'; // 境界を分かりやすくする下方向の影
+      td.style.backgroundClip = 'padding-box';
+    });
+
     pairs.forEach(function(pair) {
       const curItem = pair.curItem;
       const baseItem = pair.baseItem;
