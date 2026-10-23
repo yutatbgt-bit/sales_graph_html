@@ -231,6 +231,23 @@
     }
 
     // 起動時に保存済みデータを復元
+
+    // ファイル名ピルをクリックで個別即削除 (確認不要)
+    const pillBase = document.getElementById('file-name-base');
+    if (pillBase) {
+      pillBase.addEventListener('click', function() {
+        removeBaseFile();
+      });
+    }
+    const pillCompare = document.getElementById('file-name-compare');
+    if (pillCompare) {
+      pillCompare.addEventListener('click', function() {
+        removeCompareFile();
+      });
+    }
+
+
+
     restorePersistedData();
   }
 
@@ -296,8 +313,14 @@
   function handleFileSelected(file, targetSlot) {
     if (!file) return;
 
+    if (file.size === 0) {
+      showStatusMessage('空のファイルです。有効なExcelファイルを選択してください。', 'error');
+      return;
+    }
+
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      showStatusMessage('ファイルサイズが上限(20MB)を超えています。', 'error');
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+      showStatusMessage('ファイルサイズが上限 (20MB) を超えています (選択ファイル: ' + sizeMB + 'MB)。', 'error');
       return;
     }
 
@@ -311,6 +334,9 @@
     showStatusMessage(slotLabel + 'を解析中: ' + fileName + ' ...', 'info');
 
     const reader = new FileReader();
+    reader.onerror = function() {
+      showStatusMessage('ファイルの読み込み中にI/Oエラーが発生しました。破損またはアクセス権限を確認してください。', 'error');
+    };
     reader.onload = function(e) {
       try {
         const buffer = e.target.result;
@@ -405,6 +431,8 @@
     const placeholder = document.getElementById('chart-placeholder');
     const canvas = document.getElementById('sales-chart-canvas');
     if (placeholder) placeholder.classList.remove('hidden');
+    const chipGroup = document.querySelector('.metric-chip-group');
+    if (chipGroup) while (chipGroup.firstChild) chipGroup.removeChild(chipGroup.firstChild);
     if (canvas) canvas.classList.add('hidden');
 
     // グラフタイトルのリセット
@@ -416,7 +444,7 @@
     // テーブルタイトルのリセット
     const tableTitleEl = document.getElementById('table-main-title');
     if (tableTitleEl) {
-      tableTitleEl.textContent = '📊 日別データ一覧';
+      tableTitleEl.textContent = '日別データ一覧';
     }
 
     // テーブル表示の非表示化
@@ -618,6 +646,93 @@
   /**
    * 現在のデータセット状態（単体または対比）に応じて画面全体を更新
    */
+
+  /**
+   * 基準データを個別で即時削除
+   */
+  function removeBaseFile() {
+    if (!baseDataSet && !baseFileName) return;
+    baseDataSet = null;
+    baseFileName = '';
+    const fileInputBase = document.getElementById('file-input-base');
+    if (fileInputBase) fileInputBase.value = '';
+    updateFilePill('file-name-base', null, '', '');
+
+    if (!compareDataSet && !compareFileName) {
+      resetAllData();
+      showStatusMessage('基準データを削除しました。データがすべてクリアされました。', 'info');
+      return;
+    }
+    updateDashboardView();
+    AppStorage.set('app_state', {
+      baseDataSet: null,
+      baseFileName: '',
+      compareDataSet: compareDataSet,
+      compareFileName: compareFileName,
+      comparisonMode: comparisonMode
+    });
+    showStatusMessage('基準データを削除しました。', 'info');
+  }
+
+  /**
+   * 比較日データを個別で即時削除
+   */
+  function removeCompareFile() {
+    if (!compareDataSet && !compareFileName) return;
+    compareDataSet = null;
+    compareFileName = '';
+    const fileInputCompare = document.getElementById('file-input-compare');
+    if (fileInputCompare) fileInputCompare.value = '';
+    updateFilePill('file-name-compare', null, '', '');
+
+    if (!baseDataSet && !baseFileName) {
+      resetAllData();
+      showStatusMessage('比較日データを削除しました。データがすべてクリアされました。', 'info');
+      return;
+    }
+    updateDashboardView();
+    AppStorage.set('app_state', {
+      baseDataSet: baseDataSet,
+      baseFileName: baseFileName,
+      compareDataSet: null,
+      compareFileName: '',
+      comparisonMode: comparisonMode
+    });
+    showStatusMessage('比較日データを削除しました。', 'info');
+  }
+
+
+  /**
+   * グラフの全データセット項目（修正前の全項目）に対応した指標切替チップを動的生成・同期
+   */
+  function updateMetricChips() {
+    const container = document.querySelector('.metric-chip-group');
+    if (!container || !global.SalesChart || !global.SalesChart.getDatasetsInfo) return;
+
+    const datasetsInfo = global.SalesChart.getDatasetsInfo();
+    while (container.firstChild) {
+      container.removeChild(container.firstChild);
+    }
+
+    if (!datasetsInfo || datasetsInfo.length === 0) return;
+
+    datasetsInfo.forEach(function(info) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'metric-chip chip-' + info.metricType + (info.isBase ? ' chip-base' : ' chip-cur');
+      chip.setAttribute('data-key', info.key);
+      chip.setAttribute('aria-pressed', info.hidden ? 'false' : 'true');
+      chip.textContent = info.label;
+
+      chip.addEventListener('click', function() {
+        const isActive = global.SalesChart.toggleDataset(info.key);
+        chip.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      });
+
+      container.appendChild(chip);
+    });
+  }
+
   function updateDashboardView() {
     // 既存データセットへの曜日データの保証（再アップロードなしでも即時反映）
     ensureWeekdayData(baseDataSet, baseFileName);
@@ -658,11 +773,26 @@
     const tableTitleEl = document.getElementById('table-main-title');
     if (tableTitleEl) {
       const tSuffix = (hasCompare && hasBase) ? (effectiveMode === 'weekday' ? ' (同曜日対比)' : ' (同日対比)') : '';
-      tableTitleEl.textContent = '📊 日別データ一覧' + tSuffix;
+      tableTitleEl.textContent = '日別データ一覧' + tSuffix;
     }
 
+    // 比較凡例の更新
+    const compareLegendEl = document.getElementById('compare-legend');
+    if (compareLegendEl) {
+      const showCompareLegend = hasCompare && hasBase;
+      compareLegendEl.classList.toggle('hidden', !showCompareLegend);
+      if (showCompareLegend) {
+        const curLabel = document.getElementById('legend-cur-label');
+        const baseLabel = document.getElementById('legend-base-label');
+        if (curLabel) curLabel.textContent = '今期(比較)';
+        if (baseLabel) baseLabel.textContent = effectiveMode === 'weekday' ? '昨年同曜日(基準)' : '昨年(基準)';
+      }
+    }
     // KPIサマリーカードの更新（前年比バッジ付き: 同日数・同曜日の正確な集計）
     updateKpiCards(pairs, primaryData, secondaryData, effectiveMode);
+
+    // グラフ領域の項目選択チップ（修正前と同じ全項目）の生成・更新
+    updateMetricChips();
 
     // テーブルの更新
     renderDataTable(pairs, effectiveMode);
@@ -678,8 +808,10 @@
     if (dataSet && fileName) {
       const periodLabel = dataSet.periodInfo && dataSet.periodInfo.label ? ' [' + dataSet.periodInfo.label + ']' : '';
       el.textContent = prefix + ': ' + fileName + periodLabel;
+      el.setAttribute('title', 'クリックして ' + prefix + ' を即時削除\n' + fileName);
       el.classList.remove('hidden');
     } else {
+      el.removeAttribute('title');
       el.classList.add('hidden');
     }
   }

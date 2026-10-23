@@ -229,9 +229,19 @@
    * @param {string} [fileName] - ファイル名（期間抽出用）
    * @returns {Array<{Day: number, 客単価: number, 客数: number, 売上: number, dayOfWeek: number, weekday: string}> & { periodInfo: object, fileName: string }}
    */
+  const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
+
   function parseSalesExcel(buffer, fileName) {
     if (!buffer || !(buffer instanceof ArrayBuffer || buffer instanceof Uint8Array)) {
       throw new TypeError('不正なファイル形式です。ArrayBufferを指定してください。');
+    }
+
+    if (buffer.byteLength === 0) {
+      throw new Error('空のファイルです。有効なExcelファイルを選択してください。');
+    }
+
+    if (buffer.byteLength > MAX_FILE_SIZE_BYTES) {
+      throw new Error('ファイルサイズが上限 (20MB) を超えています。');
     }
 
     if (typeof global.XLSX === 'undefined') {
@@ -365,6 +375,7 @@
 
   // グローバル公開 (安全なネームスペース)
   global.SalesParser = {
+    MAX_FILE_SIZE_BYTES: MAX_FILE_SIZE_BYTES,
     parseSalesExcel: parseSalesExcel,
     extractPeriodInfo: extractPeriodInfo,
     detectWeekdayHeaders: detectWeekdayHeaders

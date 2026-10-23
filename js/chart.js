@@ -9,6 +9,14 @@
   'use strict';
 
   let currentChartInstance = null;
+  const datasetVisibility = {
+    'base-sales': true,
+    'cur-sales': true,
+    'base-customers': true,
+    'cur-customers': true,
+    'base-price': true,
+    'cur-price': true
+  };
 
   /**
    * 単体または対比の売上データをChart.jsで描画する
@@ -220,6 +228,9 @@
         borderWidth: 1,
         borderRadius: 3,
         yAxisID: 'ySales',
+        datasetKey: 'base-sales',
+        metricType: 'sales',
+        hidden: !datasetVisibility['base-sales'],
         order: 4,
         barPercentage: hasCurrent ? 0.85 : 0.65,
         categoryPercentage: 0.8
@@ -241,6 +252,9 @@
         borderWidth: 1.5,
         borderRadius: 4,
         yAxisID: 'ySales',
+        datasetKey: 'cur-sales',
+        metricType: 'sales',
+        hidden: !datasetVisibility['cur-sales'],
         order: 3,
         barPercentage: hasBase ? 0.85 : 0.65,
         categoryPercentage: 0.8
@@ -268,6 +282,9 @@
         pointBorderColor: pointBorderColor,
         pointBorderWidth: 1.5,
         yAxisID: 'yCount',
+        datasetKey: 'base-customers',
+        metricType: 'customers',
+        hidden: !datasetVisibility['base-customers'],
         order: 5,
         tension: 0.15,
         spanGaps: true
@@ -292,6 +309,9 @@
         pointBorderColor: pointBorderColor,
         pointBorderWidth: 2,
         yAxisID: 'yCount',
+        datasetKey: 'cur-customers',
+        metricType: 'customers',
+        hidden: !datasetVisibility['cur-customers'],
         order: 2,
         tension: 0.15,
         spanGaps: true
@@ -320,6 +340,9 @@
         pointBorderColor: pointBorderColor,
         pointBorderWidth: 1.5,
         yAxisID: 'yPrice',
+        datasetKey: 'base-price',
+        metricType: 'price',
+        hidden: !datasetVisibility['base-price'],
         order: 6,
         tension: 0.15,
         spanGaps: true
@@ -345,6 +368,9 @@
         pointBorderColor: pointBorderColor,
         pointBorderWidth: 2,
         yAxisID: 'yPrice',
+        datasetKey: 'cur-price',
+        metricType: 'price',
+        hidden: !datasetVisibility['cur-price'],
         order: 1,
         tension: 0.15,
         spanGaps: true
@@ -369,20 +395,7 @@
             display: false
           },
           legend: {
-            position: 'top',
-            align: 'end',
-            labels: {
-              usePointStyle: true,
-              boxWidth: 10,
-              boxHeight: 10,
-              padding: 16,
-              font: {
-                size: 12,
-                family: "'Inter', 'Outfit', sans-serif",
-                weight: '500'
-              },
-              color: legendTextColor
-            }
+            display: false // 指標チップが凡例を兼ねる (明滅アクティブ/非アクティブトグル)
           },
           tooltip: {
             backgroundColor: isLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(16, 28, 54, 0.95)',
@@ -454,6 +467,7 @@
           ySales: {
             type: 'linear',
             position: 'left',
+            display: (datasetVisibility['base-sales'] || datasetVisibility['cur-sales']) ? 'auto' : false,
             beginAtZero: true,
             title: {
               display: true,
@@ -477,6 +491,7 @@
           yCount: {
             type: 'linear',
             position: 'right',
+            display: (datasetVisibility['base-customers'] || datasetVisibility['cur-customers']) ? 'auto' : false,
             beginAtZero: true,
             title: {
               display: true,
@@ -499,6 +514,7 @@
           yPrice: {
             type: 'linear',
             position: 'right',
+            display: (datasetVisibility['base-price'] || datasetVisibility['cur-price']) ? 'auto' : false,
             beginAtZero: true,
             title: {
               display: true,
@@ -565,6 +581,70 @@
   /**
    * 現在のグラフインスタンスを破棄する
    */
+
+  /**
+   * 個別データセット（修正前の全項目）の可視状態を切り替え、グラフを更新する
+   * @param {string} datasetKey ('cur-sales', 'base-sales', etc.)
+   * @returns {boolean} 新しい可視状態
+   */
+  function toggleDataset(datasetKey) {
+    if (!Object.prototype.hasOwnProperty.call(datasetVisibility, datasetKey)) {
+      return false;
+    }
+    datasetVisibility[datasetKey] = !datasetVisibility[datasetKey];
+    if (currentChartInstance) {
+      currentChartInstance.data.datasets.forEach(function(ds) {
+        if (ds.datasetKey === datasetKey) {
+          ds.hidden = !datasetVisibility[datasetKey];
+        }
+      });
+
+      // 各Y軸の可視性連動（対応するデータセットがすべて非表示なら軸も非表示）
+      const hasVisibleSales = currentChartInstance.data.datasets.some(function(d) {
+        return d.metricType === 'sales' && !d.hidden;
+      });
+      const hasVisibleCustomers = currentChartInstance.data.datasets.some(function(d) {
+        return d.metricType === 'customers' && !d.hidden;
+      });
+      const hasVisiblePrice = currentChartInstance.data.datasets.some(function(d) {
+        return d.metricType === 'price' && !d.hidden;
+      });
+
+      if (currentChartInstance.options.scales.ySales) {
+        currentChartInstance.options.scales.ySales.display = hasVisibleSales ? 'auto' : false;
+      }
+      if (currentChartInstance.options.scales.yCount) {
+        currentChartInstance.options.scales.yCount.display = hasVisibleCustomers ? 'auto' : false;
+      }
+      if (currentChartInstance.options.scales.yPrice) {
+        currentChartInstance.options.scales.yPrice.display = hasVisiblePrice ? 'auto' : false;
+      }
+      currentChartInstance.update();
+    }
+    return datasetVisibility[datasetKey];
+  }
+
+  function isDatasetActive(datasetKey) {
+    return datasetVisibility[datasetKey] !== false;
+  }
+
+  /**
+   * 現在のグラフの全データセット情報（修正前の全項目）を取得
+   * @returns {Array<{ key: string, label: string, metricType: string, isBase: boolean, hidden: boolean }>}
+   */
+  function getDatasetsInfo() {
+    if (!currentChartInstance || !currentChartInstance.data.datasets) return [];
+    return currentChartInstance.data.datasets.map(function(ds) {
+      return {
+        key: ds.datasetKey,
+        label: ds.label,
+        metricType: ds.metricType,
+        isBase: String(ds.datasetKey).indexOf('base-') === 0,
+        hidden: Boolean(ds.hidden)
+      };
+    });
+  }
+
   function destroyChart() {
     if (currentChartInstance) {
       currentChartInstance.destroy();
@@ -576,6 +656,9 @@
     render: renderSalesChart,
     exportImage: exportChartImage,
     destroy: destroyChart,
-    buildComparisonPairs: buildComparisonPairs
+    buildComparisonPairs: buildComparisonPairs,
+    toggleDataset: toggleDataset,
+    isDatasetActive: isDatasetActive,
+    getDatasetsInfo: getDatasetsInfo
   };
 })(window);

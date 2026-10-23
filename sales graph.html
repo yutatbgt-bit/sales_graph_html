@@ -42,7 +42,7 @@
             <p>基準データアップロード</p>
           </label>
           <input type="file" id="file-input-base" accept=".xlsx, .xls" style="display: none;" aria-label="基準データExcelファイル選択">
-          <span id="file-name-base" class="file-pill pill-base hidden">基準: 未読込</span>
+          <button type="button" id="file-name-base" class="file-pill pill-base hidden" title="クリックして基準データを削除">基準: 未読込</button>
         </div>
 
         <!-- 比較日データ（今期売上）アップロード -->
@@ -57,7 +57,7 @@
             <p>比較日データアップロード</p>
           </label>
           <input type="file" id="file-input-compare" accept=".xlsx, .xls" style="display: none;" aria-label="比較日データExcelファイル選択">
-          <span id="file-name-compare" class="file-pill pill-compare hidden">比較: 未読込</span>
+          <button type="button" id="file-name-compare" class="file-pill pill-compare hidden" title="クリックして比較日データを削除">比較: 未読込</button>
         </div>
 
         <!-- 対比方式切り替え (同日対比 / 同曜日対比) -->
@@ -71,7 +71,7 @@
         </div>
 
         <button type="button" id="btn-export-png" class="btn btn-accent" title="現在のグラフを高解像度PNG画像として保存します">
-          💾 グラフをPNG保存
+          グラフをPNG保存
         </button>
         <button type="button" id="btn-toggle-table" class="btn btn-secondary">
           データ一覧を表示 ▼
@@ -156,6 +156,11 @@
     <section class="chart-card" aria-label="売上・客数・客単価 3軸推移グラフ">
       <div class="chart-card-header">
         <h3 id="chart-main-title">日別 売上実績・客数・客単価推移 (全店)</h3>
+        <div class="metric-chip-group" id="metric-chip-group" role="group" aria-label="グラフ表示項目の切り替え"></div>
+      </div>
+      <div id="compare-legend" class="compare-legend hidden" aria-live="polite">
+        <span class="legend-item"><span class="legend-swatch swatch-solid"></span><span id="legend-cur-label">今期</span></span>
+        <span class="legend-item"><span class="legend-swatch swatch-dashed"></span><span id="legend-base-label">昨年</span></span>
       </div>
       <div class="chart-wrapper">
         <div id="chart-placeholder" class="chart-placeholder">
@@ -170,7 +175,7 @@
     <!-- データ詳細テーブル (初期非表示) -->
     <section id="table-container" class="table-card hidden" aria-label="日別データ一覧表">
       <div class="table-header-bar">
-        <div id="table-main-title" class="table-title">📊 日別データ一覧</div>
+        <div id="table-main-title" class="table-title">日別データ一覧</div>
       </div>
       <div class="table-responsive">
         <table class="data-table">

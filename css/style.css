@@ -223,11 +223,31 @@ body {
   font-size: 11px;
   font-weight: 500;
   font-family: var(--font-num);
-  max-width: 240px;
+  max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: center;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.file-pill:hover {
+  background: rgba(239, 68, 68, 0.14) !important;
+  border-color: rgba(239, 68, 68, 0.45) !important;
+  color: #fca5a5 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+}
+
+:root[data-theme="light"] .file-pill:hover {
+  background: rgba(239, 68, 68, 0.1) !important;
+  border-color: rgba(239, 68, 68, 0.5) !important;
+  color: #dc2626 !important;
 }
 
 .pill-base {
@@ -947,4 +967,129 @@ body {
   .kpi-value {
     font-size: 22px;
   }
+}
+
+/* ==========================================================================
+   指標切替チップ (明滅・アクティブ/非アクティブトグル) & 比較凡例
+   ========================================================================== */
+.metric-chip-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.metric-chip {
+  --chip-color: var(--accent-blue);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 13px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  border-radius: var(--radius-full, 9999px);
+  border: 1px solid var(--card-border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.metric-chip::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--chip-color);
+  box-shadow: 0 0 6px var(--chip-color);
+  opacity: 0.35;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.metric-chip:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+  color: var(--text-main);
+}
+
+.metric-chip[aria-pressed="true"] {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--chip-color);
+  color: var(--text-main);
+  box-shadow: 0 0 12px rgba(var(--chip-color-rgb, 56, 189, 248), 0.25);
+}
+
+.metric-chip[aria-pressed="true"]::before {
+  opacity: 1;
+  transform: scale(1.15);
+}
+
+.metric-chip[aria-pressed="false"] {
+  opacity: 0.45;
+}
+
+.metric-chip[aria-pressed="false"]:hover {
+  opacity: 0.75;
+}
+
+:root[data-theme="light"] .metric-chip {
+  color: var(--text-muted);
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+:root[data-theme="light"] .metric-chip[aria-pressed="true"] {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text-main);
+}
+
+.chip-sales     { --chip-color: #38bdf8; --chip-color-rgb: 56, 189, 248; }
+.chip-customers { --chip-color: #34d399; --chip-color-rgb: 52, 211, 153; }
+.chip-price     { --chip-color: #d4af37; --chip-color-rgb: 212, 175, 55; }
+
+/* 比較凡例 (実線: 今期 / 点線: 昨年) */
+.compare-legend {
+  display: flex;
+  gap: 20px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 6px 0 14px 12px;
+  flex-wrap: wrap;
+}
+
+.compare-legend.hidden {
+  display: none !important;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legend-swatch {
+  width: 24px;
+  height: 0;
+  border-top: 3px solid var(--text-main);
+}
+
+.legend-swatch.swatch-dashed {
+  border-top-style: dashed;
+  opacity: 0.6;
+}
+
+/* 昨年（基準）用チップ: 点線ドットリング・落ち着いたトーン */
+.metric-chip.chip-base::before {
+  background-color: transparent !important;
+  border: 1.5px dashed var(--chip-color);
+  box-shadow: none;
+}
+
+.metric-chip.chip-base[aria-pressed="true"] {
+  border-style: dashed;
+}
+
+.metric-chip.chip-base[aria-pressed="true"]::before {
+  background-color: var(--chip-color) !important;
+  opacity: 0.75;
+  border-style: solid;
 }
