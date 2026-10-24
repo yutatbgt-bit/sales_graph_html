@@ -14,10 +14,16 @@
   // ==========================================================================
   // ハイブリッド・ストレージマネージャー (IndexedDB + localStorage フォールバック)
   // ==========================================================================
+  // ハイブリッド・ストレージマネージャー (IndexedDB + localStorage フォールバック)
+  // 店舗プロファイルごとのデータ完全分離対応
+  // ==========================================================================
   const AppStorage = (function() {
     const DB_NAME = 'SalesGraphAppDB';
     const DB_VERSION = 1;
     const STORE_NAME = 'graph_store';
+    const DEFAULT_PROFILE_NAME = 'デフォルト';
+    const PROFILES_KEY = 'profiles';
+    const PROFILE_PREFIX = 'app_state::';
 
     function openDB() {
       return new Promise(function(resolve, reject) {
@@ -36,57 +42,120 @@
       });
     }
 
-    return {
-      get: function(key) {
-        return openDB().then(function(db) {
-          return new Promise(function(resolve, reject) {
-            const tx = db.transaction(STORE_NAME, 'readonly');
-            const store = tx.objectStore(STORE_NAME);
-            const req = store.get(key);
-            req.onsuccess = function() { resolve(req.result); };
-            req.onerror = function() { reject(req.error); };
-          });
-        }).catch(function() {
-          try {
-            const raw = localStorage.getItem('sg_' + key);
-            return raw ? JSON.parse(raw) : null;
-          } catch (e) {
+    function get(key) {
+      return openDB().then(function(db) {
+        return new Promise(function(resolve, reject) {
+          const tx = db.transaction(STORE_NAME, 'readonly');
+          const store = tx.objectStore(STORE_NAME);
+          const req = store.get(key);
+          req.onsuccess = function() { resolve(req.result); };
+          req.onerror = function() { reject(req.error); };
+        });
+      }).catch(function() {
+        try {
+          const raw = localStorage.getItem('sg_' + key);
+          return raw ? JSON.parse(raw) : null;
+        } catch (e) {
+          return null;
+        }
+      });
+    }
+
+    function set(key, val) {
+      return openDB().then(function(db) {
+        return new Promise(function(resolve, reject) {
+          const tx = db.transaction(STORE_NAME, 'readwrite');
+          const store = tx.objectStore(STORE_NAME);
+          const req = store.put(val, key);
+          req.onsuccess = function() { resolve(); };
+          req.onerror = function() { reject(req.error); };
+        });
+      }).catch(function() {
+        try {
+          localStorage.setItem('sg_' + key, JSON.stringify(val));
+        } catch (e) {
+          console.warn('[AppStorage] localStorage set failed:', e);
+        }
+      });
+    }
+
+    function remove(key) {
+      return openDB().then(function(db) {
+        return new Promise(function(resolve, reject) {
+          const tx = db.transaction(STORE_NAME, 'readwrite');
+          const store = tx.objectStore(STORE_NAME);
+          const req = store.delete(key);
+          req.onsuccess = function() { resolve(); };
+          req.onerror = function() { reject(req.error); };
+        });
+      }).catch(function() {
+        try {
+          localStorage.removeItem('sg_' + key);
+        } catch (e) {}
+      });
+    }
+
+    function getProfiles() {
+      return get(PROFILES_KEY).then(function(list) {
+        if (Array.isArray(list) && list.length > 0) {
+          return list;
+        }
+        return [DEFAULT_PROFILE_NAME];
+      });
+    }
+
+    function saveProfiles(profiles) {
+      const sanitized = Array.isArray(profiles) ? profiles.filter(function(p) {
+        return typeof p === 'string' && p.trim().length > 0;
+      }) : [DEFAULT_PROFILE_NAME];
+      return set(PROFILES_KEY, sanitized.length > 0 ? sanitized : [DEFAULT_PROFILE_NAME]);
+    }
+
+    function loadProfileState(profileName) {
+      const name = profileName || DEFAULT_PROFILE_NAME;
+      const key = PROFILE_PREFIX + name;
+      return get(key).then(function(data) {
+        if (data) return data;
+        // 旧仕様 (app_state) からの移行互換
+        if (name === DEFAULT_PROFILE_NAME) {
+          return get('app_state').then(function(legacyData) {
+            if (legacyData) {
+              set(key, legacyData);
+              return legacyData;
+            }
             return null;
-          }
-        });
-      },
-      set: function(key, val) {
-        return openDB().then(function(db) {
-          return new Promise(function(resolve, reject) {
-            const tx = db.transaction(STORE_NAME, 'readwrite');
-            const store = tx.objectStore(STORE_NAME);
-            const req = store.put(val, key);
-            req.onsuccess = function() { resolve(); };
-            req.onerror = function() { reject(req.error); };
           });
-        }).catch(function() {
-          try {
-            localStorage.setItem('sg_' + key, JSON.stringify(val));
-          } catch (e) {
-            console.warn('[AppStorage] localStorage set failed:', e);
-          }
-        });
-      },
-      clearAll: function() {
-        return openDB().then(function(db) {
-          return new Promise(function(resolve, reject) {
-            const tx = db.transaction(STORE_NAME, 'readwrite');
-            const store = tx.objectStore(STORE_NAME);
-            const req = store.clear();
-            req.onsuccess = function() { resolve(); };
-            req.onerror = function() { reject(req.error); };
-          });
-        }).catch(function() {
-          try {
-            localStorage.removeItem('sg_app_state');
-          } catch (e) {}
-        });
-      }
+        }
+        return null;
+      });
+    }
+
+    function saveProfileState(profileName, stateData) {
+      const name = profileName || DEFAULT_PROFILE_NAME;
+      return set(PROFILE_PREFIX + name, stateData);
+    }
+
+    function deleteProfile(profileName) {
+      const name = profileName || DEFAULT_PROFILE_NAME;
+      return remove(PROFILE_PREFIX + name);
+    }
+
+    function clearProfileState(profileName) {
+      const name = profileName || DEFAULT_PROFILE_NAME;
+      return remove(PROFILE_PREFIX + name);
+    }
+
+    return {
+      DEFAULT_PROFILE_NAME: DEFAULT_PROFILE_NAME,
+      get: get,
+      set: set,
+      remove: remove,
+      getProfiles: getProfiles,
+      saveProfiles: saveProfiles,
+      loadProfileState: loadProfileState,
+      saveProfileState: saveProfileState,
+      deleteProfile: deleteProfile,
+      clearProfileState: clearProfileState
     };
   })();
 
@@ -101,31 +170,65 @@
   let baseFileName = '';
   let compareFileName = '';
 
+  // 店舗プロファイル管理状態
+  let currentProfile = AppStorage.DEFAULT_PROFILE_NAME;
+  let storeProfiles = [AppStorage.DEFAULT_PROFILE_NAME];
+  let profileDialogMode = 'add'; // 'add' | 'rename'
+
   document.addEventListener('DOMContentLoaded', function() {
     initApp();
   });
 
-  
   /**
-   * 起動時に保存済みデータを復元
+   * 現在の店舗プロファイルに対応するデータをストレージへ永続化
+   */
+  function saveCurrentProfileState() {
+    return AppStorage.saveProfileState(currentProfile, {
+      baseDataSet: baseDataSet,
+      baseFileName: baseFileName,
+      compareDataSet: compareDataSet,
+      compareFileName: compareFileName,
+      comparisonMode: comparisonMode,
+      savedAt: Date.now()
+    });
+  }
+
+  /**
+   * 起動時および店舗切り替え時に保存済みデータを復元
    */
   function restorePersistedData() {
-    AppStorage.get('app_state').then(function(state) {
-      if (!state) return;
+    return AppStorage.loadProfileState(currentProfile).then(function(state) {
+      if (!state) {
+        clearDashboardUI();
+        return;
+      }
       let restored = false;
       if (state.baseDataSet) {
         baseDataSet = state.baseDataSet;
         baseFileName = state.baseFileName || '';
         restored = true;
+      } else {
+        baseDataSet = null;
+        baseFileName = '';
       }
       if (state.compareDataSet) {
         compareDataSet = state.compareDataSet;
         compareFileName = state.compareFileName || '';
         restored = true;
+      } else {
+        compareDataSet = null;
+        compareFileName = '';
       }
+      if (state.comparisonMode === 'weekday' || state.comparisonMode === 'date') {
+        comparisonMode = state.comparisonMode;
+        updateComparisonModeButtons();
+      }
+
       if (restored) {
         updateDashboardView();
-        showStatusMessage('前回保存された売上データを自動復元しました。', 'info');
+        showStatusMessage('【' + currentProfile + '】の前回保存データを復元しました。', 'info');
+      } else {
+        clearDashboardUI();
       }
     }).catch(function(err) {
       console.warn('[restorePersistedData] error:', err);
@@ -248,7 +351,412 @@
 
 
 
-    restorePersistedData();
+    // 店舗プロファイル切り替え・管理イベント初期化
+    setupProfileEvents();
+
+    // 店舗プロファイル読み込みと初期データ復元
+    initProfiles();
+  }
+
+  // ---------------------------------------------------------------------------
+  // 店舗プロファイル管理 (複数店舗同時並行分析 & ストレージ分離)
+  // ---------------------------------------------------------------------------
+
+  function getHashProfile() {
+    const hash = window.location.hash || '';
+    const match = hash.match(/(?:^|[#&])store=([^&]+)/);
+    if (match && match[1]) {
+      try {
+        const decoded = decodeURIComponent(match[1]).trim();
+        if (decoded && decoded.length <= 30 && !/[\u0000-\u001F\u007F<>"'&]/.test(decoded)) {
+          return decoded;
+        }
+      } catch (e) {
+        // デコード失敗時は安全に無視
+      }
+    }
+    return null;
+  }
+
+  function setHashProfile(profileName) {
+    if (!profileName) return;
+    const newHash = '#store=' + encodeURIComponent(profileName);
+    if (window.location.hash !== newHash) {
+      window.history.replaceState(null, '', newHash);
+    }
+  }
+
+  async function initProfiles() {
+    try {
+      const profiles = await AppStorage.getProfiles();
+      storeProfiles = Array.isArray(profiles) && profiles.length > 0 ? profiles : [AppStorage.DEFAULT_PROFILE_NAME];
+
+      const hashStore = getHashProfile();
+      if (hashStore) {
+        if (!storeProfiles.includes(hashStore)) {
+          storeProfiles.push(hashStore);
+          await AppStorage.saveProfiles(storeProfiles);
+        }
+        currentProfile = hashStore;
+      } else {
+        currentProfile = storeProfiles[0] || AppStorage.DEFAULT_PROFILE_NAME;
+        setHashProfile(currentProfile);
+      }
+
+      renderProfileSelect();
+      await restorePersistedData();
+    } catch (e) {
+      console.warn('[initProfiles] failed:', e);
+      await restorePersistedData();
+    }
+  }
+
+  function renderProfileSelect() {
+    const select = document.getElementById('select-store-profile');
+    if (!select) return;
+
+    while (select.firstChild) {
+      select.removeChild(select.firstChild);
+    }
+
+    storeProfiles.forEach(function(p) {
+      const opt = document.createElement('option');
+      opt.value = p;
+      opt.textContent = p;
+      if (p === currentProfile) {
+        opt.selected = true;
+      }
+      select.appendChild(opt);
+    });
+  }
+
+  async function switchProfile(targetProfile) {
+    if (!targetProfile || targetProfile === currentProfile) return;
+
+    // 現在の店舗データを保存
+    if (baseDataSet || compareDataSet) {
+      await saveCurrentProfileState();
+    }
+
+    currentProfile = targetProfile;
+    setHashProfile(targetProfile);
+    renderProfileSelect();
+
+    // 画面状態をリセットして新店舗のデータを復元
+    baseDataSet = null;
+    compareDataSet = null;
+    baseFileName = '';
+    compareFileName = '';
+    clearDashboardUI();
+
+    await restorePersistedData();
+  }
+
+  function setupProfileEvents() {
+    const select = document.getElementById('select-store-profile');
+    if (select) {
+      select.addEventListener('change', function(e) {
+        switchProfile(e.target.value);
+      });
+    }
+
+    const btnAdd = document.getElementById('btn-add-store-profile');
+    if (btnAdd) {
+      btnAdd.addEventListener('click', function() {
+        openProfileDialog('add');
+      });
+    }
+
+    const btnRename = document.getElementById('btn-rename-store-profile');
+    if (btnRename) {
+      btnRename.addEventListener('click', function() {
+        openProfileDialog('rename');
+      });
+    }
+
+    const btnDelete = document.getElementById('btn-delete-store-profile');
+    if (btnDelete) {
+      btnDelete.addEventListener('click', function() {
+        handleDeleteProfile();
+      });
+    }
+
+    // モーダルイベント
+    const btnClose = document.getElementById('btn-close-profile-dialog');
+    const btnCancel = document.getElementById('btn-cancel-profile-dialog');
+    const btnSave = document.getElementById('btn-save-profile-dialog');
+    const inputName = document.getElementById('input-profile-name');
+
+    if (btnClose) btnClose.addEventListener('click', closeProfileDialog);
+    if (btnCancel) btnCancel.addEventListener('click', closeProfileDialog);
+    if (btnSave) btnSave.addEventListener('click', saveProfileFromDialog);
+
+    if (inputName) {
+      inputName.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          saveProfileFromDialog();
+        } else if (e.key === 'Escape') {
+          closeProfileDialog();
+        }
+      });
+    }
+
+    // URLハッシュの手動変更・別タブ同期
+    window.addEventListener('hashchange', function() {
+      const hashStore = getHashProfile();
+      if (hashStore && hashStore !== currentProfile) {
+        if (!storeProfiles.includes(hashStore)) {
+          storeProfiles.push(hashStore);
+          AppStorage.saveProfiles(storeProfiles);
+        }
+        switchProfile(hashStore);
+      }
+    });
+  }
+
+  function openProfileDialog(mode) {
+    profileDialogMode = mode;
+    const dialog = document.getElementById('profile-dialog');
+    const title = document.getElementById('profile-dialog-title');
+    const input = document.getElementById('input-profile-name');
+    const error = document.getElementById('profile-error-message');
+
+    if (!dialog || !input) return;
+
+    if (error) {
+      error.textContent = '';
+      error.classList.add('hidden');
+    }
+
+    if (mode === 'add') {
+      if (title) title.textContent = '新規店舗プロファイルを追加';
+      input.value = '';
+      input.placeholder = '例: 渋谷店、新宿店、本店';
+    } else {
+      if (title) title.textContent = '店舗プロファイル名を変更';
+      input.value = currentProfile;
+      input.placeholder = '新しい店舗名を入力';
+    }
+
+    if (typeof dialog.showModal === 'function') {
+      dialog.showModal();
+    } else {
+      dialog.setAttribute('open', '');
+    }
+    input.focus();
+    input.select();
+  }
+
+  function closeProfileDialog() {
+    const dialog = document.getElementById('profile-dialog');
+    if (!dialog) return;
+    if (typeof dialog.close === 'function') {
+      dialog.close();
+    } else {
+      dialog.removeAttribute('open');
+    }
+  }
+
+  function showProfileError(msg) {
+    const error = document.getElementById('profile-error-message');
+    if (!error) return;
+    error.textContent = msg;
+    error.classList.remove('hidden');
+  }
+
+  async function saveProfileFromDialog() {
+    const input = document.getElementById('input-profile-name');
+    if (!input) return;
+
+    const rawName = input.value.trim();
+
+    if (!rawName) {
+      showProfileError('店舗名を入力してください。');
+      return;
+    }
+    if (rawName.length > 30) {
+      showProfileError('店舗名は30文字以内で入力してください。');
+      return;
+    }
+    if (/[\u0000-\u001F\u007F<>"'&]/.test(rawName)) {
+      showProfileError('使用できない記号（< > " \' & 等）が含まれています。');
+      return;
+    }
+
+    if (profileDialogMode === 'add') {
+      if (storeProfiles.includes(rawName)) {
+        showProfileError('同名の店舗プロファイルが既に存在します。');
+        return;
+      }
+
+      // 現在の店舗データを保存
+      if (baseDataSet || compareDataSet) {
+        await saveCurrentProfileState();
+      }
+
+      storeProfiles.push(rawName);
+      await AppStorage.saveProfiles(storeProfiles);
+
+      currentProfile = rawName;
+      setHashProfile(rawName);
+      renderProfileSelect();
+      closeProfileDialog();
+
+      // 新規店舗は空の初期状態で開始
+      baseDataSet = null;
+      compareDataSet = null;
+      baseFileName = '';
+      compareFileName = '';
+      clearDashboardUI();
+
+      showStatusMessage('新規店舗「' + rawName + '」を追加しました。', 'success');
+    } else {
+      // rename モード
+      if (rawName === currentProfile) {
+        closeProfileDialog();
+        return;
+      }
+      if (storeProfiles.includes(rawName)) {
+        showProfileError('同名の店舗プロファイルが既に存在します。');
+        return;
+      }
+
+      const oldName = currentProfile;
+      const currentState = await AppStorage.loadProfileState(oldName);
+      if (currentState) {
+        await AppStorage.saveProfileState(rawName, currentState);
+        await AppStorage.deleteProfile(oldName);
+      }
+
+      const idx = storeProfiles.indexOf(oldName);
+      if (idx !== -1) {
+        storeProfiles[idx] = rawName;
+      } else {
+        storeProfiles.push(rawName);
+      }
+      await AppStorage.saveProfiles(storeProfiles);
+
+      currentProfile = rawName;
+      setHashProfile(rawName);
+      renderProfileSelect();
+      closeProfileDialog();
+
+      showStatusMessage('店舗名を「' + rawName + '」に変更しました。', 'success');
+    }
+  }
+
+  async function handleDeleteProfile() {
+    if (storeProfiles.length <= 1) {
+      showStatusMessage('これ以上店舗プロファイルを削除できません（最低1店舗必要です）。', 'warning');
+      return;
+    }
+
+    const targetName = currentProfile;
+    const confirmed = window.confirm('店舗プロファイル「' + targetName + '」を削除しますか？\n（この店舗の保存データも消去されます）');
+    if (!confirmed) return;
+
+    await AppStorage.deleteProfile(targetName);
+    storeProfiles = storeProfiles.filter(function(p) { return p !== targetName; });
+    await AppStorage.saveProfiles(storeProfiles);
+
+    currentProfile = storeProfiles[0] || AppStorage.DEFAULT_PROFILE_NAME;
+    setHashProfile(currentProfile);
+    renderProfileSelect();
+
+    baseDataSet = null;
+    compareDataSet = null;
+    baseFileName = '';
+    compareFileName = '';
+    clearDashboardUI();
+
+    await restorePersistedData();
+    showStatusMessage('店舗プロファイル「' + targetName + '」を削除しました。', 'info');
+  }
+
+  /**
+   * 対比方式ボタンのUIアクティブ状態を同期
+   */
+  function updateComparisonModeButtons() {
+    const btnModeDate = document.getElementById('btn-mode-date');
+    const btnModeWeekday = document.getElementById('btn-mode-weekday');
+    if (btnModeDate && btnModeWeekday) {
+      if (comparisonMode === 'weekday') {
+        btnModeDate.classList.remove('active');
+        btnModeWeekday.classList.add('active');
+      } else {
+        btnModeWeekday.classList.remove('active');
+        btnModeDate.classList.add('active');
+      }
+    }
+  }
+
+  /**
+   * ダッシュボード画面上の表示要素を初期クリア状態にする
+   */
+  function clearDashboardUI() {
+    const inputBase = document.getElementById('file-input-base');
+    const inputCompare = document.getElementById('file-input-compare');
+    if (inputBase) inputBase.value = '';
+    if (inputCompare) inputCompare.value = '';
+
+    updateFilePill('file-name-base', null, '', '');
+    updateFilePill('file-name-compare', null, '', '');
+
+    if (global.SalesChart && typeof global.SalesChart.destroy === 'function') {
+      global.SalesChart.destroy();
+    }
+    const placeholder = document.getElementById('chart-placeholder');
+    const canvas = document.getElementById('sales-chart-canvas');
+    if (placeholder) placeholder.classList.remove('hidden');
+    const chipGroup = document.querySelector('.metric-chip-group');
+    if (chipGroup) while (chipGroup.firstChild) chipGroup.removeChild(chipGroup.firstChild);
+    if (canvas) canvas.classList.add('hidden');
+
+    const compareLegend = document.getElementById('compare-legend');
+    if (compareLegend) compareLegend.classList.add('hidden');
+
+    const titleEl = document.getElementById('chart-main-title');
+    if (titleEl) {
+      titleEl.textContent = '日別 売上実績・客数・客単価推移 (全店)';
+    }
+
+    const tableTitleEl = document.getElementById('table-main-title');
+    if (tableTitleEl) {
+      tableTitleEl.textContent = '日別データ一覧';
+    }
+
+    const tableContainer = document.getElementById('table-container');
+    if (tableContainer) tableContainer.classList.add('hidden');
+    const btnToggleTable = document.getElementById('btn-toggle-table');
+    if (btnToggleTable) btnToggleTable.textContent = 'データ一覧を表示 ▼';
+
+    const tbody = document.getElementById('table-body');
+    if (tbody) {
+      while (tbody.firstChild) {
+        tbody.removeChild(tbody.firstChild);
+      }
+    }
+
+    setTextSafely('kpi-total-sales', '-');
+    setTextSafely('kpi-total-sales-sub', '期間内の総売上実績');
+    const salesSub = document.getElementById('kpi-total-sales-sub');
+    if (salesSub) salesSub.className = 'kpi-subtext';
+
+    setTextSafely('kpi-total-customers', '-');
+    setTextSafely('kpi-total-customers-sub', '期間内の合計客数');
+    const custSub = document.getElementById('kpi-total-customers-sub');
+    if (custSub) custSub.className = 'kpi-subtext';
+
+    setTextSafely('kpi-avg-price', '-');
+    setTextSafely('kpi-avg-price-sub', '総売上 ÷ 総来客数');
+    const priceSub = document.getElementById('kpi-avg-price-sub');
+    if (priceSub) priceSub.className = 'kpi-subtext';
+
+    setTextSafely('kpi-avg-daily-sales', '-');
+    setTextSafely('kpi-active-days', '未解析');
+    const daysSub = document.getElementById('kpi-active-days');
+    if (daysSub) daysSub.className = 'kpi-subtext';
   }
 
   /**
@@ -375,14 +883,8 @@
 
         updateDashboardView();
 
-        // ストレージへ非同期永続化保存
-        AppStorage.set('app_state', {
-          baseDataSet: baseDataSet,
-          baseFileName: baseFileName,
-          compareDataSet: compareDataSet,
-          compareFileName: compareFileName,
-          savedAt: Date.now()
-        });
+        // 店舗プロファイルへ非同期永続化保存
+        saveCurrentProfileState();
 
         const periodText = parsed.periodInfo && parsed.periodInfo.label ? ' (' + parsed.periodInfo.label + ')' : '';
         if (swapped) {
@@ -404,6 +906,7 @@
 
   /**
    * アップロードデータおよび画面表示を完全リセットして初期状態へ戻す
+   * （現在選択中の店舗データのみを消去し、他店舗データは保護する）
    */
   function resetAllData() {
     baseDataSet = null;
@@ -411,78 +914,13 @@
     baseFileName = '';
     compareFileName = '';
 
-    // ストレージから永続化データを完全消去
-    AppStorage.clearAll();
+    // 現在選択中の店舗プロファイルの永続化データを消去
+    AppStorage.clearProfileState(currentProfile);
 
-    // ファイル入力要素のリセット
-    const inputBase = document.getElementById('file-input-base');
-    const inputCompare = document.getElementById('file-input-compare');
-    if (inputBase) inputBase.value = '';
-    if (inputCompare) inputCompare.value = '';
+    // 画面表示を完全初期化
+    clearDashboardUI();
 
-    // ファイル名ピルを非表示
-    updateFilePill('file-name-base', null, '', '');
-    updateFilePill('file-name-compare', null, '', '');
-
-    // グラフの破棄とプレースホルダーの再表示
-    if (global.SalesChart && typeof global.SalesChart.destroy === 'function') {
-      global.SalesChart.destroy();
-    }
-    const placeholder = document.getElementById('chart-placeholder');
-    const canvas = document.getElementById('sales-chart-canvas');
-    if (placeholder) placeholder.classList.remove('hidden');
-    const chipGroup = document.querySelector('.metric-chip-group');
-    if (chipGroup) while (chipGroup.firstChild) chipGroup.removeChild(chipGroup.firstChild);
-    if (canvas) canvas.classList.add('hidden');
-
-    // グラフタイトルのリセット
-    const titleEl = document.getElementById('chart-main-title');
-    if (titleEl) {
-      titleEl.textContent = '日別 売上実績・客数・客単価推移 (全店)';
-    }
-
-    // テーブルタイトルのリセット
-    const tableTitleEl = document.getElementById('table-main-title');
-    if (tableTitleEl) {
-      tableTitleEl.textContent = '日別データ一覧';
-    }
-
-    // テーブル表示の非表示化
-    const tableContainer = document.getElementById('table-container');
-    if (tableContainer) tableContainer.classList.add('hidden');
-    const btnToggleTable = document.getElementById('btn-toggle-table');
-    if (btnToggleTable) btnToggleTable.textContent = 'データ一覧を表示 ▼';
-
-    // テーブル行のクリア
-    const tbody = document.getElementById('table-body');
-    if (tbody) {
-      while (tbody.firstChild) {
-        tbody.removeChild(tbody.firstChild);
-      }
-    }
-
-    // KPIカードのリセット
-    setTextSafely('kpi-total-sales', '-');
-    setTextSafely('kpi-total-sales-sub', '期間内の総売上実績');
-    const salesSub = document.getElementById('kpi-total-sales-sub');
-    if (salesSub) salesSub.className = 'kpi-subtext';
-
-    setTextSafely('kpi-total-customers', '-');
-    setTextSafely('kpi-total-customers-sub', '期間内の合計客数');
-    const custSub = document.getElementById('kpi-total-customers-sub');
-    if (custSub) custSub.className = 'kpi-subtext';
-
-    setTextSafely('kpi-avg-price', '-');
-    setTextSafely('kpi-avg-price-sub', '総売上 ÷ 総来客数');
-    const priceSub = document.getElementById('kpi-avg-price-sub');
-    if (priceSub) priceSub.className = 'kpi-subtext';
-
-    setTextSafely('kpi-avg-daily-sales', '-');
-    setTextSafely('kpi-active-days', '未解析');
-    const daysSub = document.getElementById('kpi-active-days');
-    if (daysSub) daysSub.className = 'kpi-subtext';
-
-    showStatusMessage('データをリセットしました。新しいファイルをアップロードしてください。', 'info');
+    showStatusMessage('【' + currentProfile + '】のデータをリセットしました。新しいファイルをアップロードしてください。', 'info');
   }
 
   /**
@@ -493,20 +931,11 @@
     if (comparisonMode === mode) return;
     comparisonMode = mode === 'weekday' ? 'weekday' : 'date';
 
-    const btnModeDate = document.getElementById('btn-mode-date');
-    const btnModeWeekday = document.getElementById('btn-mode-weekday');
-    if (btnModeDate && btnModeWeekday) {
-      if (comparisonMode === 'weekday') {
-        btnModeDate.classList.remove('active');
-        btnModeWeekday.classList.add('active');
-      } else {
-        btnModeWeekday.classList.remove('active');
-        btnModeDate.classList.add('active');
-      }
-    }
+    updateComparisonModeButtons();
 
     if (baseDataSet || compareDataSet) {
       updateDashboardView();
+      saveCurrentProfileState();
     }
   }
 
@@ -664,13 +1093,7 @@
       return;
     }
     updateDashboardView();
-    AppStorage.set('app_state', {
-      baseDataSet: null,
-      baseFileName: '',
-      compareDataSet: compareDataSet,
-      compareFileName: compareFileName,
-      comparisonMode: comparisonMode
-    });
+    saveCurrentProfileState();
     showStatusMessage('基準データを削除しました。', 'info');
   }
 
@@ -691,13 +1114,7 @@
       return;
     }
     updateDashboardView();
-    AppStorage.set('app_state', {
-      baseDataSet: baseDataSet,
-      baseFileName: baseFileName,
-      compareDataSet: null,
-      compareFileName: '',
-      comparisonMode: comparisonMode
-    });
+    saveCurrentProfileState();
     showStatusMessage('比較日データを削除しました。', 'info');
   }
 
