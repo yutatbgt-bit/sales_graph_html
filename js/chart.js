@@ -19,6 +19,115 @@
   };
 
   /**
+   * カスタム Interaction モード 'bottomIndex' の登録
+   * 棒グラフの下側、縦軸の1メモリより下でのみホバー・ツールチップを表示し、
+   * 1メモリより上ではホバーを出さないようにする。
+   */
+  function registerBottomIndexMode() {
+    if (!global.Chart || !global.Chart.Interaction || !global.Chart.Interaction.modes) {
+      return;
+    }
+
+    global.Chart.Interaction.modes.bottomIndex = function(chart, e, options, useFinalPosition) {
+      if (!chart || !chart.scales) {
+        return [];
+      }
+
+      // イベント座標をCanvas相対座標系で取得 (y=0が上端、下に行くほど数値が大きい)
+      let cursorY = null;
+      if (e && typeof e.y === 'number' && !isNaN(e.y)) {
+        cursorY = e.y;
+      } else if (e) {
+        const nativeEvent = e.native || e;
+        const canvas = chart.canvas;
+        const rect = canvas ? canvas.getBoundingClientRect() : null;
+        if (rect && nativeEvent && typeof nativeEvent.clientY === 'number') {
+          cursorY = nativeEvent.clientY - rect.top;
+        }
+      }
+
+      if (cursorY === null || isNaN(cursorY)) {
+        return [];
+      }
+
+      // 表示中の主要Y軸（ySalesを最優先、非表示ならyCountまたはyPrice）を取得
+      const scaleCandidates = [chart.scales.ySales, chart.scales.yCount, chart.scales.yPrice];
+      let yScale = null;
+      for (let sIdx = 0; sIdx < scaleCandidates.length; sIdx++) {
+        const sc = scaleCandidates[sIdx];
+        if (!sc) continue;
+        const isVisible = typeof sc.isVisible === 'function'
+          ? sc.isVisible()
+          : (typeof sc._isVisible === 'function'
+            ? sc._isVisible()
+            : (sc.options ? sc.options.display !== false : true));
+        if (isVisible) {
+          yScale = sc;
+          break;
+        }
+      }
+
+      if (!yScale) {
+        yScale = chart.scales.ySales || chart.scales.yCount || chart.scales.yPrice || null;
+      }
+
+      if (!yScale) {
+        return [];
+      }
+
+      // 描画領域の上下端ピクセルを取得
+      const chartBottom = (chart.chartArea && typeof chart.chartArea.bottom === 'number')
+        ? chart.chartArea.bottom
+        : (typeof yScale.bottom === 'number' ? yScale.bottom : 0);
+      const chartTop = (chart.chartArea && typeof chart.chartArea.top === 'number')
+        ? chart.chartArea.top
+        : (typeof yScale.top === 'number' ? yScale.top : 0);
+
+      // 縦軸の「1メモリ（第1目盛）」のピクセル位置を特定
+      let oneTickY = null;
+      if (Array.isArray(yScale.ticks) && yScale.ticks.length > 1) {
+        let minPositiveTickIndex = -1;
+        let minPositiveValue = Infinity;
+        for (let k = 0; k < yScale.ticks.length; k++) {
+          const val = Number(yScale.ticks[k].value);
+          if (!isNaN(val) && val > 0 && val < minPositiveValue) {
+            minPositiveValue = val;
+            minPositiveTickIndex = k;
+          }
+        }
+
+        if (minPositiveTickIndex !== -1 && typeof yScale.getPixelForTick === 'function') {
+          oneTickY = yScale.getPixelForTick(minPositiveTickIndex);
+        } else if (typeof yScale.getPixelForTick === 'function') {
+          oneTickY = yScale.getPixelForTick(1);
+        }
+      }
+
+      // フォールバック: ticksから取得できない場合は描画エリア下部15%を1メモリ領域とみなす
+      if (oneTickY === null || isNaN(oneTickY)) {
+        const height = chartBottom - chartTop;
+        oneTickY = height > 0 ? (chartBottom - height * 0.15) : (chartBottom - 40);
+      }
+
+      // Canvas座標系では上方が0、下方が大きい数値。
+      // oneTickY: 縦軸の1メモリ目盛線のYピクセル
+      // 1メモリより上 (cursorY < oneTickY): ホバーを出さない
+      // 描画エリア下端より大幅に下 (cursorY > chartBottom + 25): ホバーを出さない
+      if (cursorY < oneTickY || cursorY > (chartBottom + 25)) {
+        return [];
+      }
+
+      // 1メモリより下の場合は標準の index モード（X軸方向の全データセット）を適用
+      if (typeof global.Chart.Interaction.modes.index === 'function') {
+        return global.Chart.Interaction.modes.index(chart, e, options, useFinalPosition);
+      }
+      return [];
+    };
+  }
+
+  registerBottomIndexMode();
+
+  /**
    * 単体または対比の売上データをChart.jsで描画する
    * @param {HTMLCanvasElement} canvasElement
    * @param {Array<{Day: number, 客単価: number, 客数: number, 売上: number}>} currentData - 今期（比較データ）
@@ -169,6 +278,9 @@
     }
 
     const mode = comparisonMode === 'weekday' ? 'weekday' : 'date';
+
+    // カスタム Interaction モードが未登録の場合は確実に登録
+    registerBottomIndexMode();
 
     // 既存インスタンスがあれば破棄
     if (currentChartInstance) {
@@ -387,7 +499,7 @@
         responsive: true,
         maintainAspectRatio: false,
         interaction: {
-          mode: 'index',
+          mode: 'bottomIndex',
           intersect: false
         },
         plugins: {
