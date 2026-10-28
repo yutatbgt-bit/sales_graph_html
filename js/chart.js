@@ -757,6 +757,318 @@
     });
   }
 
+  const kanbanChartInstances = [];
+
+  function destroyKanbanCharts() {
+    while (kanbanChartInstances.length > 0) {
+      const chart = kanbanChartInstances.pop();
+      if (chart && typeof chart.destroy === 'function') {
+        chart.destroy();
+      }
+    }
+  }
+
+  /**
+   * カンバンカード専用の3軸グラフ描画 (軽量・高速・スッキリした比較表示)
+   * @param {HTMLCanvasElement} canvasElement
+   * @param {Array} currentData - 今期データ
+   * @param {Array} [baseData] - 昨年データ
+   * @param {'date'|'weekday'} [comparisonMode='date']
+   * @returns {object|null} Chartインスタンス
+   */
+  function renderKanbanChart(canvasElement, currentData, baseData, comparisonMode) {
+    if (!canvasElement || !(canvasElement instanceof HTMLCanvasElement)) {
+      return null;
+    }
+
+    const hasCurrent = Array.isArray(currentData) && currentData.length > 0;
+    const hasBase = Array.isArray(baseData) && baseData.length > 0;
+    if (!hasCurrent && !hasBase) {
+      return null;
+    }
+
+    const mode = comparisonMode === 'weekday' ? 'weekday' : 'date';
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+
+    const pairs = buildComparisonPairs(currentData, baseData, mode);
+    const labels = pairs.map(function(p) {
+      return p.day + '日';
+    });
+
+    // カラーパレット定義 (テーマ連動)
+    const colorSalesCur = isLight ? '#0284c7' : '#38bdf8';
+    const colorSalesCurBg = isLight ? 'rgba(2, 132, 199, 0.65)' : 'rgba(56, 189, 248, 0.65)';
+    const colorCountCur = isLight ? '#059669' : '#34d399';
+    const colorPriceCur = isLight ? '#b45309' : '#d4af37';
+
+    const colorSalesBase = isLight ? 'rgba(100, 116, 139, 0.6)' : 'rgba(148, 163, 184, 0.6)';
+    const colorSalesBaseBg = isLight ? 'rgba(100, 116, 139, 0.2)' : 'rgba(148, 163, 184, 0.2)';
+    const colorCountBase = isLight ? 'rgba(5, 150, 105, 0.45)' : 'rgba(52, 211, 153, 0.45)';
+    const colorPriceBase = isLight ? 'rgba(180, 83, 9, 0.45)' : 'rgba(212, 175, 55, 0.45)';
+
+    const pointBorderColor = isLight ? '#ffffff' : '#070d19';
+    const gridColor = isLight ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.04)';
+    const tickTextColor = isLight ? '#64748b' : '#94a3b8';
+
+    const datasets = [];
+
+    // 1. 売上バー (千円)
+    if (hasBase) {
+      const baseSales = pairs.map(function(p) {
+        return p.baseItem ? Math.round(p.baseItem['売上'] / 1000) : (hasCurrent ? 0 : null);
+      });
+      datasets.push({
+        type: 'bar',
+        label: '昨年 売上 (千円)',
+        data: baseSales,
+        backgroundColor: colorSalesBaseBg,
+        borderColor: colorSalesBase,
+        borderWidth: 1,
+        borderRadius: 2,
+        yAxisID: 'ySales',
+        order: 4,
+        barPercentage: hasCurrent ? 0.85 : 0.65,
+        categoryPercentage: 0.8
+      });
+    }
+
+    if (hasCurrent) {
+      const curSales = pairs.map(function(p) {
+        return p.curItem ? Math.round(p.curItem['売上'] / 1000) : 0;
+      });
+      datasets.push({
+        type: 'bar',
+        label: '今期 売上 (千円)',
+        data: curSales,
+        backgroundColor: colorSalesCurBg,
+        borderColor: colorSalesCur,
+        borderWidth: 1.2,
+        borderRadius: 3,
+        yAxisID: 'ySales',
+        order: 3,
+        barPercentage: hasBase ? 0.85 : 0.65,
+        categoryPercentage: 0.8
+      });
+    }
+
+    // 2. 客数 (人)
+    if (hasBase) {
+      const baseCounts = pairs.map(function(p) {
+        return p.baseItem ? p.baseItem['客数'] : null;
+      });
+      datasets.push({
+        type: 'line',
+        label: '昨年 客数 (人)',
+        data: baseCounts,
+        borderColor: colorCountBase,
+        backgroundColor: colorCountBase,
+        borderWidth: 1.2,
+        borderDash: [4, 3],
+        pointRadius: 2,
+        pointHoverRadius: 4,
+        pointBackgroundColor: colorCountBase,
+        pointBorderColor: pointBorderColor,
+        pointBorderWidth: 1,
+        yAxisID: 'yCount',
+        order: 5,
+        tension: 0.15,
+        spanGaps: true
+      });
+    }
+
+    if (hasCurrent) {
+      const curCounts = pairs.map(function(p) {
+        return p.curItem ? p.curItem['客数'] : null;
+      });
+      datasets.push({
+        type: 'line',
+        label: '今期 客数 (人)',
+        data: curCounts,
+        borderColor: colorCountCur,
+        backgroundColor: colorCountCur,
+        borderWidth: 2,
+        pointRadius: 3,
+        pointHoverRadius: 6,
+        pointBackgroundColor: colorCountCur,
+        pointBorderColor: pointBorderColor,
+        pointBorderWidth: 1.5,
+        yAxisID: 'yCount',
+        order: 2,
+        tension: 0.15,
+        spanGaps: true
+      });
+    }
+
+    // 3. 客単価 (円)
+    if (hasBase) {
+      const basePrices = pairs.map(function(p) {
+        return p.baseItem ? p.baseItem['客単価'] : null;
+      });
+      datasets.push({
+        type: 'line',
+        label: '昨年 客単価 (円)',
+        data: basePrices,
+        borderColor: colorPriceBase,
+        backgroundColor: colorPriceBase,
+        borderWidth: 1.2,
+        borderDash: [3, 3],
+        pointStyle: 'rectRot',
+        pointRadius: 2.5,
+        pointHoverRadius: 4,
+        pointBackgroundColor: colorPriceBase,
+        pointBorderColor: pointBorderColor,
+        pointBorderWidth: 1,
+        yAxisID: 'yPrice',
+        order: 6,
+        tension: 0.15,
+        spanGaps: true
+      });
+    }
+
+    if (hasCurrent) {
+      const curPrices = pairs.map(function(p) {
+        return p.curItem ? p.curItem['客単価'] : null;
+      });
+      datasets.push({
+        type: 'line',
+        label: '今期 客単価 (円)',
+        data: curPrices,
+        borderColor: colorPriceCur,
+        backgroundColor: colorPriceCur,
+        borderWidth: 2,
+        pointStyle: 'rectRot',
+        pointRadius: 3.5,
+        pointHoverRadius: 6,
+        pointBackgroundColor: colorPriceCur,
+        pointBorderColor: pointBorderColor,
+        pointBorderWidth: 1.5,
+        yAxisID: 'yPrice',
+        order: 1,
+        tension: 0.15,
+        spanGaps: true
+      });
+    }
+
+    const chartConfig = {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: datasets
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: {
+          mode: 'index',
+          intersect: false
+        },
+        plugins: {
+          legend: {
+            display: false
+          },
+          tooltip: {
+            backgroundColor: isLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(10, 18, 36, 0.95)',
+            titleColor: isLight ? '#0f172a' : '#f8fafc',
+            bodyColor: isLight ? '#334155' : '#cbd5e1',
+            borderColor: isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.12)',
+            borderWidth: 1,
+            padding: 8,
+            boxPadding: 4,
+            usePointStyle: true,
+            callbacks: {
+              title: function(items) {
+                if (!items || items.length === 0) return '';
+                const idx = items[0].dataIndex;
+                const p = pairs[idx];
+                if (!p) return '';
+                if (mode === 'weekday' && p.baseItem) {
+                  return p.curLabel + ' [昨: ' + p.baseLabel + ']';
+                }
+                return p.curLabel;
+              },
+              label: function(context) {
+                const label = context.dataset.label || '';
+                const val = context.parsed.y;
+                if (val === null || val === undefined) return null;
+                const formatted = Number(val).toLocaleString();
+                return label + ': ' + formatted;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { color: gridColor },
+            ticks: {
+              color: tickTextColor,
+              font: { size: 10 },
+              maxRotation: 0,
+              autoSkip: true,
+              maxTicksLimit: 16
+            }
+          },
+          ySales: {
+            type: 'linear',
+            position: 'left',
+            beginAtZero: true,
+            grid: { color: gridColor },
+            ticks: {
+              color: colorSalesCur,
+              font: { size: 9 },
+              callback: function(v) { return Number(v).toLocaleString(); }
+            },
+            title: {
+              display: true,
+              text: '千円',
+              color: colorSalesCur,
+              font: { size: 9 }
+            }
+          },
+          yCount: {
+            type: 'linear',
+            position: 'right',
+            beginAtZero: true,
+            grid: { drawOnChartArea: false },
+            ticks: {
+              color: colorCountCur,
+              font: { size: 9 },
+              callback: function(v) { return Number(v).toLocaleString(); }
+            },
+            title: {
+              display: true,
+              text: '人',
+              color: colorCountCur,
+              font: { size: 9 }
+            }
+          },
+          yPrice: {
+            type: 'linear',
+            position: 'right',
+            beginAtZero: true,
+            grid: { drawOnChartArea: false },
+            ticks: {
+              color: colorPriceCur,
+              font: { size: 9 },
+              callback: function(v) { return Number(v).toLocaleString(); }
+            },
+            title: {
+              display: true,
+              text: '円',
+              color: colorPriceCur,
+              font: { size: 9 }
+            }
+          }
+        }
+      }
+    };
+
+    const ctx = canvasElement.getContext('2d');
+    const newChart = new global.Chart(ctx, chartConfig);
+    kanbanChartInstances.push(newChart);
+    return newChart;
+  }
+
   function destroyChart() {
     if (currentChartInstance) {
       currentChartInstance.destroy();
@@ -766,6 +1078,8 @@
 
   global.SalesChart = {
     render: renderSalesChart,
+    renderKanbanChart: renderKanbanChart,
+    destroyKanbanCharts: destroyKanbanCharts,
     exportImage: exportChartImage,
     destroy: destroyChart,
     buildComparisonPairs: buildComparisonPairs,

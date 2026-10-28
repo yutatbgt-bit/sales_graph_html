@@ -56,7 +56,7 @@
             </svg>
             <p>基準データアップロード</p>
           </label>
-          <input type="file" id="file-input-base" accept=".xlsx, .xls" style="display: none;" aria-label="基準データExcelファイル選択">
+          <input type="file" id="file-input-base" accept=".xlsx, .xls, .xlsm, .xlsb, .csv" style="display: none;" aria-label="基準データ(Excel/CSV)ファイル選択">
           <button type="button" id="file-name-base" class="file-pill pill-base hidden" title="クリックして基準データを削除">基準: 未読込</button>
         </div>
 
@@ -71,7 +71,7 @@
             </svg>
             <p>比較日データアップロード</p>
           </label>
-          <input type="file" id="file-input-compare" accept=".xlsx, .xls" style="display: none;" aria-label="比較日データExcelファイル選択">
+          <input type="file" id="file-input-compare" accept=".xlsx, .xls, .xlsm, .xlsb, .csv" style="display: none;" aria-label="比較日データ(Excel/CSV)ファイル選択">
           <button type="button" id="file-name-compare" class="file-pill pill-compare hidden" title="クリックして比較日データを削除">比較: 未読込</button>
         </div>
 
@@ -85,14 +85,24 @@
           </button>
         </div>
 
+        <!-- 表示ビュー切り替え (個別店舗 / 全店同時比較カンバン) -->
+        <div class="view-toggle-group" role="tablist" aria-label="表示ビュー切り替え">
+          <button type="button" id="btn-view-single" class="btn-view-tab active" role="tab" aria-selected="true" title="個別店舗の詳細グラフを表示します">
+            個別店舗
+          </button>
+          <button type="button" id="btn-view-kanban" class="btn-view-tab" role="tab" aria-selected="false" title="登録店舗を2列カンバンビューで同時比較します">
+            全店同時比較
+          </button>
+        </div>
+
         <button type="button" id="btn-export-png" class="btn btn-accent" title="現在のグラフを高解像度PNG画像として保存します">
           グラフをPNG保存
         </button>
         <button type="button" id="btn-toggle-table" class="btn btn-secondary">
           データ一覧を表示 ▼
         </button>
-        <!-- データリセットボタン（アイコン表示のみ） -->
-        <button type="button" id="btn-reset-data" class="header-icon-btn btn-reset-data" title="読み込んだデータをリセットして初期状態に戻します" aria-label="データをリセット">
+        <!-- 全店舗データ一括削除ボタン（アイコン表示のみ） -->
+        <button type="button" id="btn-reset-data" class="header-icon-btn btn-reset-data" title="全店舗の売上データを一括削除します" aria-label="全店舗の売上データを一括削除">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <polyline points="3 6 5 6 21 6"></polyline>
             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -180,7 +190,7 @@
       <div class="chart-wrapper">
         <div id="chart-placeholder" class="chart-placeholder">
           <div class="placeholder-icon">📊</div>
-          <p class="placeholder-text">Excelファイルを選択するとグラフが表示されます</p>
+          <p class="placeholder-text">ExcelまたはCSVファイルを選択するとグラフが表示されます</p>
           <p class="placeholder-subtext">右上の「基準データアップロード」「比較日データアップロード」からファイルを選択またはドロップしてください</p>
         </div>
         <canvas id="sales-chart-canvas" role="img" aria-label="日別売上実績・客数・客単価の3軸対比グラフ" class="hidden"></canvas>
@@ -217,6 +227,23 @@
       </div>
     </section>
 
+    <!-- 全店同時比較 2列カンバンビューセクション (初期非表示) -->
+    <section id="kanban-view-container" class="kanban-view-container hidden" aria-label="全店舗 2列カンバン比較ビュー">
+      <div class="kanban-header-bar">
+        <div class="kanban-title-wrap">
+          <h2 class="kanban-main-title">全店同時比較 (2列カンバンビュー)</h2>
+          <span id="kanban-store-count-badge" class="kanban-badge">全店舗 同時比較</span>
+        </div>
+        <div class="compare-legend kanban-legend" aria-live="polite">
+          <span class="legend-item"><span class="legend-swatch swatch-solid"></span><span>今期 (棒:売上 / 線:客数・単価)</span></span>
+          <span class="legend-item"><span class="legend-swatch swatch-dashed"></span><span>昨年 (棒:売上 / 点線:客数・単価)</span></span>
+        </div>
+      </div>
+      <div id="kanban-grid" class="kanban-grid">
+        <!-- JavaScript (DOM API) により全店舗のカード（店舗名ヘッダー + 3軸グラフCanvas）が安全に挿入されます -->
+      </div>
+    </section>
+
   </main>
 
   <!-- 店舗プロファイル追加・名称変更ダイアログ -->
@@ -234,6 +261,42 @@
       <div class="profile-dialog-footer">
         <button type="button" id="btn-cancel-profile-dialog" class="btn btn-secondary btn-sm">キャンセル</button>
         <button type="button" id="btn-save-profile-dialog" class="btn btn-accent btn-sm">保存</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 店舗プロファイル削除確認ダイアログ (ブラウザ依存排除・確実なモーダルUI) -->
+  <dialog id="delete-confirm-dialog" class="profile-dialog" aria-labelledby="delete-dialog-title">
+    <div class="profile-dialog-content">
+      <div class="profile-dialog-header">
+        <h3 id="delete-dialog-title" class="profile-dialog-title">店舗プロファイルの削除</h3>
+        <button type="button" id="btn-close-delete-dialog" class="dialog-close-btn" aria-label="閉じる">×</button>
+      </div>
+      <div class="profile-dialog-body">
+        <p class="delete-dialog-message">店舗プロファイル「<strong id="delete-target-store-name"></strong>」を削除しますか？</p>
+        <p class="delete-dialog-subtext">※この店舗に紐づく保存データも完全に消去されます。この操作は取り消せません。</p>
+      </div>
+      <div class="profile-dialog-footer">
+        <button type="button" id="btn-cancel-delete-dialog" class="btn btn-secondary btn-sm">キャンセル</button>
+        <button type="button" id="btn-confirm-delete-dialog" class="btn btn-accent btn-delete-confirm btn-sm">削除する</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 全店舗データ一括削除確認ダイアログ -->
+  <dialog id="reset-confirm-dialog" class="profile-dialog" aria-labelledby="reset-dialog-title">
+    <div class="profile-dialog-content">
+      <div class="profile-dialog-header">
+        <h3 id="reset-dialog-title" class="profile-dialog-title">全店舗データの一括削除</h3>
+        <button type="button" id="btn-close-reset-dialog" class="dialog-close-btn" aria-label="閉じる">×</button>
+      </div>
+      <div class="profile-dialog-body">
+        <p class="delete-dialog-message">全店舗に保存された売上実績データを一括削除しますか？</p>
+        <p class="delete-dialog-subtext">※全店舗の基準データおよび比較日データがすべて消去され、初期状態に戻ります。<br>※登録済みの店舗名一覧（プロファイル）はそのまま保持されます。<br>※この操作は取り消せません。</p>
+      </div>
+      <div class="profile-dialog-footer">
+        <button type="button" id="btn-cancel-reset-dialog" class="btn btn-secondary btn-sm">キャンセル</button>
+        <button type="button" id="btn-confirm-reset-dialog" class="btn btn-accent btn-delete-confirm btn-sm">一括削除を実行</button>
       </div>
     </div>
   </dialog>

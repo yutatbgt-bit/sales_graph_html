@@ -21,7 +21,7 @@
     const DB_NAME = 'SalesGraphAppDB';
     const DB_VERSION = 1;
     const STORE_NAME = 'graph_store';
-    const DEFAULT_PROFILE_NAME = 'デフォルト';
+    const DEFAULT_PROFILE_NAME = '全店';
     const PROFILES_KEY = 'profiles';
     const PROFILE_PREFIX = 'app_state::';
 
@@ -98,7 +98,17 @@
     function getProfiles() {
       return get(PROFILES_KEY).then(function(list) {
         if (Array.isArray(list) && list.length > 0) {
-          return list;
+          const cleaned = list.filter(function(p) {
+            if (!p || typeof p !== 'string') return false;
+            const t = p.trim();
+            if (t.length === 0) return false;
+            // Sheet1, 空店舗 等の無効なプロファイル名を完全排除
+            if (/^(?:sheet\s*\d*|シート\s*\d*|page\s*\d*|table\s*\d*|ワークシート\d*|空店舗)$/i.test(t)) {
+              return false;
+            }
+            return true;
+          });
+          if (cleaned.length > 0) return cleaned;
         }
         return [DEFAULT_PROFILE_NAME];
       });
@@ -106,7 +116,13 @@
 
     function saveProfiles(profiles) {
       const sanitized = Array.isArray(profiles) ? profiles.filter(function(p) {
-        return typeof p === 'string' && p.trim().length > 0;
+        if (!p || typeof p !== 'string') return false;
+        const t = p.trim();
+        if (t.length === 0) return false;
+        if (/^(?:sheet\s*\d*|シート\s*\d*|page\s*\d*|table\s*\d*|ワークシート\d*|空店舗)$/i.test(t)) {
+          return false;
+        }
+        return true;
       }) : [DEFAULT_PROFILE_NAME];
       return set(PROFILES_KEY, sanitized.length > 0 ? sanitized : [DEFAULT_PROFILE_NAME]);
     }
@@ -145,6 +161,94 @@
       return remove(PROFILE_PREFIX + name);
     }
 
+    function loadAllProfilesState() {
+      return getProfiles().then(function(profiles) {
+        // ハードコードされた店舗は強制読み込みせず、登録されているプロファイルを基準に取得
+        const set = new Set();
+        (profiles || []).forEach(function(p) {
+          if (p && typeof p === 'string' && p.trim()) set.add(p.trim());
+        });
+        const targetList = Array.from(set);
+
+        const promises = targetList.map(function(pName) {
+          return loadProfileState(pName).then(function(state) {
+            return { profileName: pName, state: state };
+          });
+        });
+        return Promise.all(promises);
+      });
+    }
+
+    function clearAllStoresData() {
+      // 1. IndexedDB内の全キーを走査し、PROFILES_KEY以外のすべての売上データを完全削除
+      const dbPromise = openDB().then(function(db) {
+        return new Promise(function(resolve) {
+          try {
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+
+            // getAllKeys が利用可能な場合は一括キー取得して削除
+            if (typeof store.getAllKeys === 'function') {
+              const req = store.getAllKeys();
+              req.onsuccess = function() {
+                const keys = req.result || [];
+                keys.forEach(function(k) {
+                  // PROFILES_KEY（店舗名リスト）のみ保護し、それ以外の全売上キャッシュ・データを完全消去
+                  if (k !== PROFILES_KEY) {
+                    store.delete(k);
+                  }
+                });
+              };
+            } else if (typeof store.openCursor === 'function') {
+              const cursorReq = store.openCursor();
+              cursorReq.onsuccess = function(e) {
+                const cursor = e.target.result;
+                if (cursor) {
+                  if (cursor.key !== PROFILES_KEY) {
+                    cursor.delete();
+                  }
+                  cursor.continue();
+                }
+              };
+            }
+
+            tx.oncomplete = function() { resolve(); };
+            tx.onerror = function(e) {
+              console.warn('[AppStorage] IndexedDB clear tx error:', e);
+              resolve();
+            };
+            tx.onabort = function() { resolve(); };
+          } catch (ex) {
+            console.warn('[AppStorage] clearAllStoresData tx failed:', ex);
+            resolve();
+          }
+        });
+      }).catch(function(err) {
+        console.warn('[AppStorage] openDB failed during clearAllStoresData:', err);
+      });
+
+      // 2. localStorage 内のフォールバック・キャッシュも走査して完全消去
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          const keysToRemove = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            // sg_profiles 以外で sg_ で始まるすべての売上・状態キー（テーマ設定を除く）を確実に削除
+            if (k && k !== 'sg_' + PROFILES_KEY && k !== THEME_STORAGE_KEY) {
+              if (k.indexOf('sg_app_state') === 0 || k === 'sg_app_state' || k.indexOf('sg_') === 0) {
+                keysToRemove.push(k);
+              }
+            }
+          }
+          keysToRemove.forEach(function(k) { localStorage.removeItem(k); });
+        }
+      } catch (e) {
+        console.warn('[AppStorage] clear localStorage failed:', e);
+      }
+
+      return dbPromise;
+    }
+
     return {
       DEFAULT_PROFILE_NAME: DEFAULT_PROFILE_NAME,
       get: get,
@@ -153,9 +257,11 @@
       getProfiles: getProfiles,
       saveProfiles: saveProfiles,
       loadProfileState: loadProfileState,
+      loadAllProfilesState: loadAllProfilesState,
       saveProfileState: saveProfileState,
       deleteProfile: deleteProfile,
-      clearProfileState: clearProfileState
+      clearProfileState: clearProfileState,
+      clearAllStoresData: clearAllStoresData
     };
   })();
 
@@ -165,8 +271,11 @@
   const THEME_STORAGE_KEY = 'sales_graph_theme';
   let currentTheme = 'dark';
   let comparisonMode = 'date';  // 'date' (同日対比) | 'weekday' (同曜日対比)
+  let currentViewMode = 'single'; // 'single' (個別店舗) | 'kanban' (全店同時比較)
   let baseDataSet = null;       // 基準データ (昨年売上)
   let compareDataSet = null;    // 比較日データ (今期売上)
+  let baseAllStores = null;     // 全店舗基準データ解析結果
+  let compareAllStores = null;  // 全店舗比較日データ解析結果
   let baseFileName = '';
   let compareFileName = '';
 
@@ -264,6 +373,20 @@
       });
     }
 
+    // 表示ビュー切り替えボタン (個別店舗 / 全店同時比較カンバン)
+    const btnViewSingle = document.getElementById('btn-view-single');
+    const btnViewKanban = document.getElementById('btn-view-kanban');
+    if (btnViewSingle) {
+      btnViewSingle.addEventListener('click', function() {
+        switchViewMode('single');
+      });
+    }
+    if (btnViewKanban) {
+      btnViewKanban.addEventListener('click', function() {
+        switchViewMode('kanban');
+      });
+    }
+
     // 基準データ用コントロール
     setupDropZone('drop-zone-base', 'file-input-base', function(file) {
       handleFileSelected(file, 'base');
@@ -321,15 +444,11 @@
       });
     }
 
-    // データリセットボタン
+    // 全店舗データ一括削除ボタン（モーダル確認ダイアログを開く）
     const btnResetData = document.getElementById('btn-reset-data');
     if (btnResetData) {
       btnResetData.addEventListener('click', function() {
-        if (!compareDataSet && !baseDataSet) {
-          showStatusMessage('リセットするデータがありません。', 'info');
-          return;
-        }
-        resetAllData();
+        openResetConfirmDialog();
       });
     }
 
@@ -392,11 +511,8 @@
       storeProfiles = Array.isArray(profiles) && profiles.length > 0 ? profiles : [AppStorage.DEFAULT_PROFILE_NAME];
 
       const hashStore = getHashProfile();
-      if (hashStore) {
-        if (!storeProfiles.includes(hashStore)) {
-          storeProfiles.push(hashStore);
-          await AppStorage.saveProfiles(storeProfiles);
-        }
+      // ハッシュが存在し登録店舗に含まれている場合のみ選択、不正値・テスト残存値ならデフォルト（全店）
+      if (hashStore && storeProfiles.includes(hashStore) && hashStore !== '空店舗') {
         currentProfile = hashStore;
       } else {
         currentProfile = storeProfiles[0] || AppStorage.DEFAULT_PROFILE_NAME;
@@ -477,11 +593,11 @@
     const btnDelete = document.getElementById('btn-delete-store-profile');
     if (btnDelete) {
       btnDelete.addEventListener('click', function() {
-        handleDeleteProfile();
+        openDeleteProfileDialog();
       });
     }
 
-    // モーダルイベント
+    // 追加・名称変更モーダルイベント
     const btnClose = document.getElementById('btn-close-profile-dialog');
     const btnCancel = document.getElementById('btn-cancel-profile-dialog');
     const btnSave = document.getElementById('btn-save-profile-dialog');
@@ -501,6 +617,24 @@
         }
       });
     }
+
+    // 削除確認モーダルイベント
+    const btnCloseDelete = document.getElementById('btn-close-delete-dialog');
+    const btnCancelDelete = document.getElementById('btn-cancel-delete-dialog');
+    const btnConfirmDelete = document.getElementById('btn-confirm-delete-dialog');
+
+    if (btnCloseDelete) btnCloseDelete.addEventListener('click', closeDeleteProfileDialog);
+    if (btnCancelDelete) btnCancelDelete.addEventListener('click', closeDeleteProfileDialog);
+    if (btnConfirmDelete) btnConfirmDelete.addEventListener('click', executeDeleteProfile);
+
+    // 全店舗データ一括削除確認モーダルイベント
+    const btnCloseReset = document.getElementById('btn-close-reset-dialog');
+    const btnCancelReset = document.getElementById('btn-cancel-reset-dialog');
+    const btnConfirmReset = document.getElementById('btn-confirm-reset-dialog');
+
+    if (btnCloseReset) btnCloseReset.addEventListener('click', closeResetConfirmDialog);
+    if (btnCancelReset) btnCancelReset.addEventListener('click', closeResetConfirmDialog);
+    if (btnConfirmReset) btnConfirmReset.addEventListener('click', executeResetAllStoresData);
 
     // URLハッシュの手動変更・別タブ同期
     window.addEventListener('hashchange', function() {
@@ -610,6 +744,11 @@
       compareFileName = '';
       clearDashboardUI();
 
+      // カンバンビュー表示中であれば即座に再描画して連携
+      if (currentViewMode === 'kanban') {
+        renderKanbanView();
+      }
+
       showStatusMessage('新規店舗「' + rawName + '」を追加しました。', 'success');
     } else {
       // rename モード
@@ -642,28 +781,71 @@
       renderProfileSelect();
       closeProfileDialog();
 
+      // カンバンビュー表示中であれば即座に名称同期再描画
+      if (currentViewMode === 'kanban') {
+        renderKanbanView();
+      }
+
       showStatusMessage('店舗名を「' + rawName + '」に変更しました。', 'success');
     }
   }
 
-  async function handleDeleteProfile() {
+  function openDeleteProfileDialog() {
     if (storeProfiles.length <= 1) {
       showStatusMessage('これ以上店舗プロファイルを削除できません（最低1店舗必要です）。', 'warning');
       return;
     }
 
-    const targetName = currentProfile;
-    const confirmed = window.confirm('店舗プロファイル「' + targetName + '」を削除しますか？\n（この店舗の保存データも消去されます）');
-    if (!confirmed) return;
+    const dialog = document.getElementById('delete-confirm-dialog');
+    const nameEl = document.getElementById('delete-target-store-name');
+    if (!dialog) return;
 
+    if (nameEl) {
+      nameEl.textContent = currentProfile;
+    }
+
+    if (typeof dialog.showModal === 'function') {
+      dialog.showModal();
+    } else {
+      dialog.setAttribute('open', '');
+    }
+  }
+
+  function closeDeleteProfileDialog() {
+    const dialog = document.getElementById('delete-confirm-dialog');
+    if (!dialog) return;
+
+    if (typeof dialog.close === 'function') {
+      dialog.close();
+    } else {
+      dialog.removeAttribute('open');
+    }
+  }
+
+  async function executeDeleteProfile() {
+    if (storeProfiles.length <= 1) {
+      closeDeleteProfileDialog();
+      showStatusMessage('これ以上店舗プロファイルを削除できません（最低1店舗必要です）。', 'warning');
+      return;
+    }
+
+    const targetName = currentProfile;
+
+    // ストレージから対象店舗データを削除
     await AppStorage.deleteProfile(targetName);
+
+    // 店舗プロファイルリストから除外
     storeProfiles = storeProfiles.filter(function(p) { return p !== targetName; });
     await AppStorage.saveProfiles(storeProfiles);
 
+    // 次の店舗プロファイルに切り替え
     currentProfile = storeProfiles[0] || AppStorage.DEFAULT_PROFILE_NAME;
     setHashProfile(currentProfile);
     renderProfileSelect();
 
+    closeDeleteProfileDialog();
+
+    // 画面状態をリセットして新店舗のデータを復元
     baseDataSet = null;
     compareDataSet = null;
     baseFileName = '';
@@ -671,7 +853,86 @@
     clearDashboardUI();
 
     await restorePersistedData();
+
+    // 全店同時比較カンバンビュー表示中であれば即座に再描画
+    if (currentViewMode === 'kanban') {
+      renderKanbanView();
+    }
+
     showStatusMessage('店舗プロファイル「' + targetName + '」を削除しました。', 'info');
+  }
+
+  /**
+   * 全店舗データ一括削除確認ダイアログを開く
+   */
+  function openResetConfirmDialog() {
+    const dialog = document.getElementById('reset-confirm-dialog');
+    if (!dialog) return;
+
+    if (typeof dialog.showModal === 'function') {
+      dialog.showModal();
+    } else {
+      dialog.setAttribute('open', '');
+    }
+  }
+
+  /**
+   * 全店舗データ一括削除確認ダイアログを閉じる
+   */
+  function closeResetConfirmDialog() {
+    const dialog = document.getElementById('reset-confirm-dialog');
+    if (!dialog) return;
+
+    if (typeof dialog.close === 'function') {
+      dialog.close();
+    } else {
+      dialog.removeAttribute('open');
+    }
+  }
+
+  /**
+   * 全店舗の売上実績データを一括削除する実行処理
+   * - 登録済み店舗名プロファイル（全店＋ユーザー登録店舗）は保持
+   * - 全店舗の保存データ（IndexedDB/localStorage）を一括クリア
+   * - メモリ上のデータセットを初期化し、即座にUIへ反映
+   */
+  async function executeResetAllStoresData() {
+    try {
+      // 1. 全店舗の保存データを一括削除 (店舗一覧 profiles は保持)
+      await AppStorage.clearAllStoresData();
+
+      // 2. メモリ上のデータセット・ファイル名・全店キャッシュを初期化
+      baseDataSet = null;
+      compareDataSet = null;
+      baseFileName = '';
+      compareFileName = '';
+      baseAllStores = null;
+      compareAllStores = null;
+
+      // 3. カンバン用チャートの破棄
+      if (global.SalesChart && typeof global.SalesChart.destroyKanbanCharts === 'function') {
+        global.SalesChart.destroyKanbanCharts();
+      }
+      if (global.SalesChart && typeof global.SalesChart.destroy === 'function') {
+        global.SalesChart.destroy();
+      }
+
+      // 4. ダッシュボードUIの初期化（バッジ・入力欄・テーブル・KPIすべて）
+      clearDashboardUI();
+
+      // 5. カンバンビューも確実に最新のゼロ状態で同期再描画
+      await renderKanbanView();
+
+      // 6. ダイアログを閉じる
+      closeResetConfirmDialog();
+
+      // 7. ユーザーへの通知
+      showStatusMessage('全店舗の売上データを一括削除しました。', 'info');
+    } catch (err) {
+      console.error('[executeResetAllStoresData] 一括削除エラー:', err);
+      closeResetConfirmDialog();
+      showStatusMessage('全店舗データの一括削除中にエラーが発生しました。', 'error');
+    }
   }
 
   /**
@@ -757,6 +1018,13 @@
     setTextSafely('kpi-active-days', '未解析');
     const daysSub = document.getElementById('kpi-active-days');
     if (daysSub) daysSub.className = 'kpi-subtext';
+
+    // カンバンビューのデータ連携バッジも安全に初期化
+    const kanbanBadge = document.getElementById('kanban-store-count-badge');
+    if (kanbanBadge) {
+      kanbanBadge.textContent = 'データ連携: 0店舗';
+      kanbanBadge.classList.add('hidden');
+    }
   }
 
   /**
@@ -833,8 +1101,8 @@
     }
 
     const fileName = file.name || '';
-    if (!fileName.toLowerCase().endsWith('.xlsx') && !fileName.toLowerCase().endsWith('.xls')) {
-      showStatusMessage('Excelファイル (.xlsx または .xls) を選択してください。', 'error');
+    if (!/\.(xlsx|xls|xlsm|xlsb|csv)$/i.test(fileName)) {
+      showStatusMessage('ExcelまたはCSVファイル (.xlsx, .xls, .csv) を選択してください。', 'error');
       return;
     }
 
@@ -848,19 +1116,67 @@
     reader.onload = function(e) {
       try {
         const buffer = e.target.result;
-        const parsed = global.SalesParser.parseSalesExcel(buffer, fileName);
-        if (!parsed || parsed.length === 0) {
+        const allStoresParsed = global.SalesParser.parseAllStoreSheets(buffer, fileName, storeProfiles, currentProfile);
+        const singleParsed = (allStoresParsed.stores && allStoresParsed.stores[currentProfile]) ||
+                             (allStoresParsed.stores && allStoresParsed.stores['全店']) ||
+                             global.SalesParser.parseSalesExcel(buffer, fileName, currentProfile);
+
+        if (!singleParsed || singleParsed.length === 0) {
           showStatusMessage('有効な売上データが見つかりませんでした。フォーマットを確認してください。', 'error');
           return;
         }
 
-        // 該当スロットへ一時格納
+        // 該当スロットへ格納
         if (targetSlot === 'base') {
-          baseDataSet = parsed;
+          baseDataSet = singleParsed;
           baseFileName = fileName;
+          baseAllStores = allStoresParsed;
         } else {
-          compareDataSet = parsed;
+          compareDataSet = singleParsed;
           compareFileName = fileName;
+          compareAllStores = allStoresParsed;
+        }
+
+        // 店舗プロファイルリストの自動拡張（ファイル内の新規検出店舗を追加順に登録、ただしSheet1等の汎用シート名は除外）
+        if (allStoresParsed.storeNames && allStoresParsed.storeNames.length > 0) {
+          let profilesChanged = false;
+          allStoresParsed.storeNames.forEach(function(sName) {
+            if (!sName || typeof sName !== 'string') return;
+            const trimmed = sName.trim();
+            if (/^(?:sheet\s*\d*|シート\s*\d*|page\s*\d*|table\s*\d*|ワークシート\d*)$/i.test(trimmed)) {
+              return;
+            }
+            if (!storeProfiles.includes(trimmed)) {
+              storeProfiles.push(trimmed);
+              profilesChanged = true;
+            }
+          });
+          if (profilesChanged) {
+            renderProfileSelect();
+            AppStorage.saveProfiles(storeProfiles);
+          }
+        }
+
+        // ファイル内の全店舗データを各店舗プロファイルストレージへその都度自動保存・同期
+        if (allStoresParsed.stores && allStoresParsed.storeNames) {
+          allStoresParsed.storeNames.forEach(function(sName) {
+            const sData = allStoresParsed.stores[sName];
+            if (sData && sData.length > 0) {
+              AppStorage.loadProfileState(sName).then(function(prevState) {
+                const updated = prevState || {};
+                if (targetSlot === 'base') {
+                  updated.baseDataSet = sData;
+                  updated.baseFileName = fileName;
+                } else {
+                  updated.compareDataSet = sData;
+                  updated.compareFileName = fileName;
+                }
+                updated.comparisonMode = comparisonMode;
+                updated.savedAt = Date.now();
+                AppStorage.saveProfileState(sName, updated);
+              });
+            }
+          });
         }
 
         // 2つのファイルが存在する場合、期間チェック（古い方を基準、新しい方を比較に自動調整）
@@ -873,24 +1189,47 @@
           if (baseKey > 0 && compKey > 0 && baseKey > compKey) {
             const tempSet = baseDataSet;
             const tempName = baseFileName;
+            const tempAll = baseAllStores;
             baseDataSet = compareDataSet;
             baseFileName = compareFileName;
+            baseAllStores = compareAllStores;
             compareDataSet = tempSet;
             compareFileName = tempName;
+            compareAllStores = tempAll;
             swapped = true;
           }
         }
 
-        updateDashboardView();
+        // 現在選択中の店舗データを全店舗データから再抽出（単一店舗ビュー用）
+        if (allStoresParsed.stores && allStoresParsed.stores[currentProfile]) {
+          if (targetSlot === 'base') {
+            baseDataSet = allStoresParsed.stores[currentProfile];
+          } else {
+            compareDataSet = allStoresParsed.stores[currentProfile];
+          }
+          ensureWeekdayData(baseDataSet, baseFileName);
+          ensureWeekdayData(compareDataSet, compareFileName);
+        }
+
+        // 表示ビューに応じたレンダリング
+        if (currentViewMode === 'kanban') {
+          renderKanbanView();
+        } else {
+          updateDashboardView();
+        }
 
         // 店舗プロファイルへ非同期永続化保存
         saveCurrentProfileState();
 
-        const periodText = parsed.periodInfo && parsed.periodInfo.label ? ' (' + parsed.periodInfo.label + ')' : '';
+        const periodText = singleParsed.periodInfo && singleParsed.periodInfo.label ? ' (' + singleParsed.periodInfo.label + ')' : '';
+        const storeCountText = allStoresParsed.storeNames && allStoresParsed.storeNames.length > 1
+          ? ' [' + allStoresParsed.storeNames.length + '店舗を検出]'
+          : '';
+
         if (swapped) {
-          showStatusMessage('期間の古いデータを「基準データ(昨年)」、新しいデータを「今期データ」として自動整列しました。', 'success');
+          showStatusMessage('期間の古いデータを「基準データ(昨年)」、新しいデータを「今期データ」として自動整列しました。' + storeCountText, 'success');
         } else {
-          showStatusMessage('「' + fileName + '」' + periodText + ' の読み込みが完了しました。', 'success');
+          showStatusMessage('「' + fileName + '」' + periodText + storeCountText + ' の読み込みが完了しました。', 'success');
         }
       } catch (err) {
         showStatusMessage('解析エラー: ' + err.message, 'error');
@@ -913,12 +1252,22 @@
     compareDataSet = null;
     baseFileName = '';
     compareFileName = '';
+    baseAllStores = null;
+    compareAllStores = null;
+
+    if (global.SalesChart && typeof global.SalesChart.destroyKanbanCharts === 'function') {
+      global.SalesChart.destroyKanbanCharts();
+    }
 
     // 現在選択中の店舗プロファイルの永続化データを消去
     AppStorage.clearProfileState(currentProfile);
 
     // 画面表示を完全初期化
     clearDashboardUI();
+
+    if (currentViewMode === 'kanban') {
+      renderKanbanView();
+    }
 
     showStatusMessage('【' + currentProfile + '】のデータをリセットしました。新しいファイルをアップロードしてください。', 'info');
   }
@@ -933,9 +1282,327 @@
 
     updateComparisonModeButtons();
 
-    if (baseDataSet || compareDataSet) {
+    if (currentViewMode === 'kanban') {
+      renderKanbanView();
+    } else if (baseDataSet || compareDataSet) {
       updateDashboardView();
       saveCurrentProfileState();
+    }
+  }
+
+  /**
+   * 表示ビューモード切り替え (個別店舗 / 全店同時比較カンバン)
+   * @param {'single'|'kanban'} mode
+   */
+  function switchViewMode(mode) {
+    currentViewMode = mode === 'kanban' ? 'kanban' : 'single';
+
+    const btnSingle = document.getElementById('btn-view-single');
+    const btnKanban = document.getElementById('btn-view-kanban');
+    const kanbanContainer = document.getElementById('kanban-view-container');
+    const chartCard = document.querySelector('.chart-card');
+    const tableContainer = document.getElementById('table-container');
+    const btnToggleTable = document.getElementById('btn-toggle-table');
+
+    if (currentViewMode === 'kanban') {
+      if (btnSingle) {
+        btnSingle.classList.remove('active');
+        btnSingle.setAttribute('aria-selected', 'false');
+      }
+      if (btnKanban) {
+        btnKanban.classList.add('active');
+        btnKanban.setAttribute('aria-selected', 'true');
+      }
+
+      if (chartCard) chartCard.classList.add('hidden');
+      if (tableContainer) tableContainer.classList.add('hidden');
+      if (btnToggleTable) btnToggleTable.style.display = 'none';
+      if (kanbanContainer) kanbanContainer.classList.remove('hidden');
+
+      renderKanbanView();
+    } else {
+      if (btnSingle) {
+        btnSingle.classList.add('active');
+        btnSingle.setAttribute('aria-selected', 'true');
+      }
+      if (btnKanban) {
+        btnKanban.classList.remove('active');
+        btnKanban.setAttribute('aria-selected', 'false');
+      }
+
+      if (kanbanContainer) kanbanContainer.classList.add('hidden');
+      if (chartCard) chartCard.classList.remove('hidden');
+      if (btnToggleTable) btnToggleTable.style.display = '';
+
+      if (compareDataSet || baseDataSet) {
+        updateDashboardView();
+      }
+    }
+  }
+
+  /**
+   * 登録店舗の2列カンバンビューを描画
+   * ユーザー要件:
+   * - データが入っている店舗のみを2列カンバンビューで表示
+   * - グラフの項目選択機能は不要
+   * - 各グラフィックカードのヘッダーは各店舗名のみ表示
+   * - 時間帯の表の表示は不要
+   * - 単純にグラフのみを2列カンバンビューで表示
+   * - 1つのExcelブック内の複数シートデータ（表記ゆれ自動吸収）
+   * - 店舗プロファイルごとに個別に保存されたストレージデータ
+   * の両方を完全自動集約・統合してデータが存在する店舗のみを描画する
+   */
+  async function renderKanbanView() {
+    const kanbanGrid = document.getElementById('kanban-grid');
+    if (!kanbanGrid) return;
+
+    // 既存のChartインスタンスを全破棄
+    if (global.SalesChart && typeof global.SalesChart.destroyKanbanCharts === 'function') {
+      global.SalesChart.destroyKanbanCharts();
+    }
+
+    // DOM要素をクリア
+    while (kanbanGrid.firstChild) {
+      kanbanGrid.removeChild(kanbanGrid.firstChild);
+    }
+
+    // バッジを即座にリセット（データ連携完了時のみ再表示）
+    const badgeEl = document.getElementById('kanban-store-count-badge');
+    if (badgeEl) {
+      badgeEl.textContent = 'データ連携: 0店舗';
+      badgeEl.classList.add('hidden');
+    }
+
+    // 1. 各店舗プロファイル（IndexedDB/localStorage）に保存されているデータを全件一括ロード
+    let persistedMap = {};
+    let hasPersistedData = false;
+    try {
+      const allPersisted = await AppStorage.loadAllProfilesState();
+      if (Array.isArray(allPersisted)) {
+        allPersisted.forEach(function(item) {
+          if (item && item.state) {
+            const hasData = (item.state.compareDataSet && item.state.compareDataSet.length > 0) ||
+                            (item.state.baseDataSet && item.state.baseDataSet.length > 0);
+            if (hasData) {
+              hasPersistedData = true;
+              persistedMap[item.profileName] = item.state;
+              if (global.SalesParser && typeof global.SalesParser.resolveStandardStoreName === 'function') {
+                const std = global.SalesParser.resolveStandardStoreName(item.profileName);
+                if (std) persistedMap[std] = item.state;
+              }
+            }
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('[renderKanbanView] loadAllProfilesState failed:', e);
+    }
+
+    // データが存在するか判定（ファイル直読み込み or ストレージ保存データ）
+    const hasAnyData = hasPersistedData || !!(
+      (compareAllStores && compareAllStores.storeNames && compareAllStores.storeNames.length > 0) ||
+      (baseAllStores && baseAllStores.storeNames && baseAllStores.storeNames.length > 0) ||
+      (compareDataSet && compareDataSet.length > 0) ||
+      (baseDataSet && baseDataSet.length > 0)
+    );
+
+    if (!hasAnyData) {
+      const ph = document.createElement('div');
+      ph.className = 'kanban-placeholder';
+      const icon = document.createElement('div');
+      icon.className = 'kanban-placeholder-icon';
+      icon.textContent = '📊';
+      const p1 = document.createElement('p');
+      p1.className = 'placeholder-text';
+      p1.textContent = 'ExcelまたはCSVファイルをアップロードすると、比較グラフが2列カンバンビューで表示されます';
+      const p2 = document.createElement('p');
+      p2.className = 'placeholder-subtext';
+      p2.textContent = '画面右上の「基準データアップロード」「比較日データアップロード」からファイルを選択、または店舗ごとにアップロードしてください';
+      ph.appendChild(icon);
+      ph.appendChild(p1);
+      ph.appendChild(p2);
+      kanbanGrid.appendChild(ph);
+      return;
+    }
+
+    // 表示店舗リストの決定（ハードコード廃止: ユーザーが追加した店舗プロファイルを「追加順」でそのまま表示）
+    const storeNames = [];
+    const seenStores = new Set();
+
+    function addStore(name) {
+      if (!name || typeof name !== 'string') return;
+      const trimmed = name.trim();
+      if (!trimmed || trimmed === 'デフォルト') return;
+      if (!seenStores.has(trimmed)) {
+        seenStores.add(trimmed);
+        storeNames.push(trimmed);
+      }
+    }
+
+    // 1. ユーザーが追加した店舗プロファイルを「追加された順番」で最優先に登録
+    if (Array.isArray(storeProfiles)) {
+      storeProfiles.forEach(function(p) {
+        addStore(p);
+      });
+    }
+
+    // 2. アップロードされたファイルから検出された店舗があれば出現順に追加
+    if (compareAllStores && Array.isArray(compareAllStores.storeNames)) {
+      compareAllStores.storeNames.forEach(function(s) { addStore(s); });
+    }
+    if (baseAllStores && Array.isArray(baseAllStores.storeNames)) {
+      baseAllStores.storeNames.forEach(function(s) { addStore(s); });
+    }
+
+    // 3. ストレージ内に保存されている店舗で未追加のものがあれば追加
+    Object.keys(persistedMap).forEach(function(k) {
+      addStore(k);
+    });
+
+    // 店舗が全くない場合は「全店」をフォールバック
+    if (storeNames.length === 0) {
+      addStore('全店');
+    }
+
+    // 各店舗のデータ集約カウント用
+    let storesWithDataCount = 0;
+
+    // 各店舗カードを2列カンバングリッドに生成
+    storeNames.forEach(function(storeName) {
+      let curData = null;
+      let baseData = null;
+      let curFileName = compareFileName;
+      let baseFileNameToUse = baseFileName;
+
+      // 1. 直近アップロードされたファイル内のシートデータ（表記ゆれ自動解決）
+      if (compareAllStores && compareAllStores.stores) {
+        curData = compareAllStores.stores[storeName];
+        if (!curData && global.SalesParser && global.SalesParser.resolveStandardStoreName) {
+          for (const k in compareAllStores.stores) {
+            if (global.SalesParser.resolveStandardStoreName(k) === storeName) {
+              curData = compareAllStores.stores[k];
+              break;
+            }
+          }
+        }
+      }
+      if (baseAllStores && baseAllStores.stores) {
+        baseData = baseAllStores.stores[storeName];
+        if (!baseData && global.SalesParser && global.SalesParser.resolveStandardStoreName) {
+          for (const k in baseAllStores.stores) {
+            if (global.SalesParser.resolveStandardStoreName(k) === storeName) {
+              baseData = baseAllStores.stores[k];
+              break;
+            }
+          }
+        }
+      }
+
+      // 2. 店舗プロファイル（ストレージ保存データ）からの補完
+      const savedState = persistedMap[storeName];
+      if (savedState) {
+        if (!curData && savedState.compareDataSet && savedState.compareDataSet.length > 0) {
+          curData = savedState.compareDataSet;
+          if (savedState.compareFileName) curFileName = savedState.compareFileName;
+        }
+        if (!baseData && savedState.baseDataSet && savedState.baseDataSet.length > 0) {
+          baseData = savedState.baseDataSet;
+          if (savedState.baseFileName) baseFileNameToUse = savedState.baseFileName;
+        }
+      }
+
+      // 3. 現在アクティブな店舗プロファイルのメモリ上データ
+      if (storeName === currentProfile || (storeName === '全店' && !curData && !baseData && (currentProfile === 'デフォルト' || currentProfile === '全店'))) {
+        if (!curData && compareDataSet && compareDataSet.length > 0) {
+          curData = compareDataSet;
+        }
+        if (!baseData && baseDataSet && baseDataSet.length > 0) {
+          baseData = baseDataSet;
+        }
+      }
+
+      const hasStoreData = !!((curData && curData.length > 0) || (baseData && baseData.length > 0));
+      // ユーザー要件: データが入っていない店舗はカンバンに表示しない（データが存在する店舗のみ描画）
+      if (!hasStoreData) {
+        return;
+      }
+      storesWithDataCount++;
+
+      // 曜日データの保証
+      ensureWeekdayData(curData, curFileName);
+      ensureWeekdayData(baseData, baseFileNameToUse);
+
+      const card = document.createElement('div');
+      card.className = 'kanban-card has-data';
+
+      // ヘッダー: 店舗名のみ表示 (ユーザー要求: 余計な日付対比文字列や項目選択チップは一切不要)
+      const header = document.createElement('div');
+      header.className = 'kanban-card-header';
+
+      const title = document.createElement('h4');
+      title.className = 'kanban-store-title';
+      title.textContent = storeName;
+      header.appendChild(title);
+
+      if (storeName === '全店') {
+        const tag = document.createElement('span');
+        tag.className = 'kanban-store-tag';
+        tag.textContent = '全体合計';
+        header.appendChild(tag);
+      } else {
+        const tag = document.createElement('span');
+        tag.className = 'kanban-store-tag tag-ready';
+        tag.textContent = '連携済';
+        header.appendChild(tag);
+      }
+
+      card.appendChild(header);
+
+      // グラフ描画領域 (Canvas)
+      const chartWrapper = document.createElement('div');
+      chartWrapper.className = 'kanban-chart-wrapper';
+
+      const canvas = document.createElement('canvas');
+      canvas.className = 'kanban-chart-canvas';
+      canvas.setAttribute('role', 'img');
+      canvas.setAttribute('aria-label', storeName + ' 売上・客数・客単価 対比グラフ');
+      chartWrapper.appendChild(canvas);
+
+      card.appendChild(chartWrapper);
+      kanbanGrid.appendChild(card);
+
+      // チャート描画
+      global.SalesChart.renderKanbanChart(canvas, curData, baseData, comparisonMode);
+    });
+
+    // データが存在する店舗が1つもない場合のフォールバック表示
+    if (storesWithDataCount === 0) {
+      const ph = document.createElement('div');
+      ph.className = 'kanban-placeholder';
+      const icon = document.createElement('div');
+      icon.className = 'kanban-placeholder-icon';
+      icon.textContent = '📊';
+      const p1 = document.createElement('p');
+      p1.className = 'placeholder-text';
+      p1.textContent = '現在、売上データが読み込まれている店舗がありません';
+      const p2 = document.createElement('p');
+      p2.className = 'placeholder-subtext';
+      p2.textContent = '画面右上の「基準データアップロード」「比較日データアップロード」からファイルを選択、または店舗ごとにアップロードしてください';
+      ph.appendChild(icon);
+      ph.appendChild(p1);
+      ph.appendChild(p2);
+      kanbanGrid.appendChild(ph);
+    }
+
+    // バッジの店舗数更新 (データが存在する店舗数のみを表示し、0店舗時は非表示)
+    if (badgeEl) {
+      if (storesWithDataCount > 0) {
+        badgeEl.textContent = 'データ連携: ' + storesWithDataCount + '店舗';
+        badgeEl.classList.remove('hidden');
+      } else {
+        badgeEl.textContent = 'データ連携: 0店舗';
+        badgeEl.classList.add('hidden');
+      }
     }
   }
 
@@ -1850,8 +2517,12 @@
     }
 
     // チャートが存在していればテーマ連動再描画
-    if (shouldRerenderChart && (baseDataSet || compareDataSet)) {
-      updateDashboardView();
+    if (shouldRerenderChart) {
+      if (currentViewMode === 'kanban') {
+        renderKanbanView();
+      } else if (baseDataSet || compareDataSet) {
+        updateDashboardView();
+      }
     }
   }
 
