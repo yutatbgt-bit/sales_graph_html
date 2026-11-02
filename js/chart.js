@@ -206,10 +206,20 @@
         }
       }
 
+      let baseMaxDay = 0;
+      baseData.forEach(function(d) {
+        if (d.Day > baseMaxDay) baseMaxDay = d.Day;
+      });
+
       if (baseStartDay !== null && curFirst) {
         const offset = baseStartDay - curFirst.Day; // 例: 2026年9月1日(火) ⇔ 2025年9月2日(火) -> offset = +1
         for (let d = 1; d <= maxDay; d++) {
-          const targetBaseDay = d + offset;
+          let targetBaseDay = d + offset;
+          // 月末で昨年データがはみ出る場合 (例: offset = +1 で d = 30 のとき targetBaseDay = 31 > 30)
+          // 昨年の初日 (Day 1) から順に割り当てることで、一ヶ月分の合計に昨年初日を含め、昨年最終日の空欄を解消
+          if (baseMaxDay > 0 && targetBaseDay > baseMaxDay) {
+            targetBaseDay = targetBaseDay - baseMaxDay;
+          }
           weekdayBaseMap[d] = baseMap[targetBaseDay] || null;
         }
       } else {
@@ -233,6 +243,25 @@
             weekdayBaseMap[d] = (baseByDow[dow] && baseByDow[dow][idx]) || null;
           } else {
             weekdayBaseMap[d] = baseMap[d] || null;
+          }
+        }
+      }
+
+      // 安全ガード: 昨年の初日 (baseMap[1]) が未割り当てで、最終日の昨年データが空欄の場合に確実に割り当てる
+      if (baseMap[1]) {
+        let isFirstDayAssigned = false;
+        for (let d = 1; d <= maxDay; d++) {
+          if (weekdayBaseMap[d] && weekdayBaseMap[d].Day === 1) {
+            isFirstDayAssigned = true;
+            break;
+          }
+        }
+        if (!isFirstDayAssigned) {
+          for (let d = maxDay; d >= 1; d--) {
+            if (!weekdayBaseMap[d]) {
+              weekdayBaseMap[d] = baseMap[1];
+              break;
+            }
           }
         }
       }
