@@ -381,6 +381,110 @@
   const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
 
   /**
+   * 日付セル値から日番号（1〜31の整数）を安全かつ高精度に抽出
+   * "1", "01", 1, "1日", "9/1", "09/01", "9月1日", "2026/09/01", "9/1(火)", Excelシリアル値, Dateオブジェクトに対応
+   * @param {any} val
+   * @returns {number|null} 1〜31の整数、またはnull
+   */
+  function extractDayNumber(val) {
+    if (val === null || val === undefined) return null;
+
+    // 1. Dateオブジェクト
+    if (val instanceof Date) {
+      const d = val.getDate();
+      return (Number.isFinite(d) && d >= 1 && d <= 31) ? d : null;
+    }
+
+    // 2. 数値
+    if (typeof val === 'number') {
+      if (!Number.isFinite(val)) return null;
+      // 1〜31の整数そのもの
+      if (val >= 1 && val <= 31 && Math.floor(val) === val) {
+        return val;
+      }
+      // Excelシリアル値 (40000〜55000: 2009年〜2050年)
+      if (val >= 40000 && val <= 55000) {
+        const utcDays = Math.floor(val - 25569);
+        const dateObj = new Date(utcDays * 86400 * 1000);
+        const d = dateObj.getUTCDate();
+        return (Number.isFinite(d) && d >= 1 && d <= 31) ? d : null;
+      }
+      return null;
+    }
+
+    const s = normalizeText(String(val)).trim();
+    if (!s || s === 'nan' || s === '_' || s === '-') return null;
+
+    // 期間範囲文字列（例: "2026年11月01日~2026年11月30日", "11/1-11/30"）は期間情報であり日番号ではないため除外
+    if (/[~〜]|(?:\d+.*[-–—]\s*\d+)|(?:to)/i.test(s)) {
+      return null;
+    }
+
+    // 「表示期間」「検索店舗」「売上」「合計」等の見出し文字列を除外
+    if (/(?:期間|店舗|検索|売上|客数|単価|合計|前年|予算)/.test(s)) {
+      return null;
+    }
+
+    // (A) "01日", "02月", "03火", "04水", "05木", "06金", "07土", "08日"
+    const matchDayDow = s.match(/^0?([1-9]|[12]\d|3[01])\s*([日月火水木金土])$/);
+    if (matchDayDow) {
+      return parseInt(matchDayDow[1], 10);
+    }
+
+    // (B) 年月日 (例: 2026/09/01, 2026-9-1, 2026.9.1, 2026年9月1日, 令和8年9月1日)
+    const matchYmd = s.match(/^(?:20\d{2}|令和\d+|令\d+|R\d+)[\/\-._年]\s*\d{1,2}[\/\-._月]\s*(\d{1,2})日?$/i);
+    if (matchYmd) {
+      const d = parseInt(matchYmd[1], 10);
+      if (d >= 1 && d <= 31) return d;
+    }
+
+    // (C) 月/日 (例: 9/1, 09/01, 9-1, 9.1, 9月1日, 9/1(火))
+    const matchMd = s.match(/^(?:^|[^\d\w])?(\d{1,2})[\/\-._月]\s*(\d{1,2})日?(?:\([日月火水木金土]\))?$/);
+    if (matchMd) {
+      const m = parseInt(matchMd[1], 10);
+      const d = parseInt(matchMd[2], 10);
+      if (m >= 1 && m <= 12 && d >= 1 && d <= 31) return d;
+    }
+
+    // (D) 日付 + 任意テキスト (例: 1日, 01日, 1日(火), 1 (Tue))
+    const matchDay = s.match(/^0?([1-9]|[12]\d|3[01])\s*日/);
+    if (matchDay) {
+      const d = parseInt(matchDay[1], 10);
+      if (d >= 1 && d <= 31) return d;
+    }
+
+    // (E) 純粋な数字 (例: "1", " 01 ", "31")
+    const matchPureNum = s.match(/^0?([1-9]|[12]\d|3[01])$/);
+    if (matchPureNum) {
+      return parseInt(matchPureNum[1], 10);
+    }
+
+    return null;
+  }
+
+  /**
+   * 日付セル文字列（例: "01日", "02月", "03火" 等）から曜日インデックス（0:日〜6:土）を安全に抽出
+   * @param {any} val
+   * @returns {number|null} 0〜6の整数、またはnull
+   */
+  function extractWeekdayFromCell(val) {
+    if (val === null || val === undefined) return null;
+    const s = normalizeText(String(val)).trim();
+    if (!s || s === 'nan' || s === '_') return null;
+
+    // 末尾または日付直後の曜日漢字（日, 月, 火, 水, 木, 金, 土）を検出
+    const match = s.match(/([日月火水木金土])(?:曜日)?$/) || s.match(/\d{1,2}\s*([日月火水木金土])/);
+    if (match) {
+      const DOW_LOOKUP = { '日': 0, '月': 1, '火': 2, '水': 3, '木': 4, '金': 5, '土': 6 };
+      if (DOW_LOOKUP[match[1]] !== undefined) {
+        return DOW_LOOKUP[match[1]];
+      }
+    }
+    return null;
+  }
+
+
+  /**
    * 単一ワークシートから日別売上データを解析
    * @param {object} worksheet - SheetJS worksheet
    * @param {string} fileName - ファイル名
@@ -399,31 +503,63 @@
 
     if (!Array.isArray(rows) || rows.length < 5) return null;
 
-    // カレンダーの開始行を動的に探索 (デフォルト5行目=index 4、空行やヘッダーによるズレを自動吸収)
+    // カレンダーの開始行を動的に探索
+    // 月初（1日）が週末で第1週に1セルしか存在しない月（例: 2026年11月、1日のみ）や
+    // 月曜始まり・日曜始まりカレンダーに完全対応
     let baseStartRow = 4;
     for (let r = 0; r < Math.min(rows.length - 3, 15); r++) {
       const row = rows[r];
       if (!Array.isArray(row)) continue;
+
+      let hasDayOne = false;
       let dayHits = 0;
-      for (let c = 0; c < Math.min(row.length, 10); c++) {
+
+      for (let c = 0; c < Math.min(row.length, 14); c++) {
         const val = row[c];
         if (val === null || val === undefined) continue;
-        const s = String(val).trim();
-        const digits = s.replace(/\D/g, '');
-        if (digits) {
-          const num = parseInt(digits, 10);
-          if (num >= 1 && num <= 7) {
+        const d = extractDayNumber(val);
+        if (d !== null) {
+          if (d === 1) {
+            hasDayOne = true;
+          }
+          if (d >= 1 && d <= 7) {
             dayHits++;
           }
         }
       }
-      if (dayHits >= 2) {
+
+      // 後続行（r+1〜r+3）に数値データ（客単価・客数・売上）が存在することを確認（ヘッダー行との誤認防止）
+      let hasNumbersBelow = false;
+      if (r + 3 < rows.length) {
+        for (let subR = r + 1; subR <= r + 3; subR++) {
+          const subRow = rows[subR];
+          if (Array.isArray(subRow)) {
+            for (let sc = 0; sc < Math.min(subRow.length, 14); sc++) {
+              const numVal = Number(subRow[sc]);
+              if (Number.isFinite(numVal) && numVal > 0) {
+                hasNumbersBelow = true;
+                break;
+              }
+            }
+          }
+          if (hasNumbersBelow) break;
+        }
+      }
+
+      // (A) 1日（Day 1）を含み、かつ後続行に数値が存在すれば、これがカレンダー第1週の開始行（最優先）
+      if (hasDayOne && hasNumbersBelow) {
+        baseStartRow = r;
+        break;
+      }
+
+      // (B) 1〜7日のいずれかを2日以上含み、かつ後続行に数値が存在する場合
+      if (dayHits >= 2 && hasNumbersBelow) {
         baseStartRow = r;
         break;
       }
     }
 
-    const parsedData = [];
+    let parsedData = [];
 
     // 最大6ブロック分（週ごと、4行単位）を取得
     for (let i = 0; i < 6; i++) {
@@ -443,23 +579,12 @@
           continue;
         }
 
-        const dateStr = String(dateVal).trim();
-        if (!dateStr || dateStr === 'nan') {
+        // 堅牢な日番号抽出（"1", "1日", "9/1", "9月1日", Excelシリアル値等に完全対応）
+        const day = extractDayNumber(dateVal);
+        if (day === null) {
           continue;
         }
 
-        // 日にちの数字だけを抽出 (例: "01日" -> 1)
-        const digitsOnly = dateStr.replace(/\D/g, '');
-        if (!digitsOnly) {
-          continue;
-        }
-
-        const day = parseInt(digitsOnly, 10);
-        if (!Number.isFinite(day) || day < 1 || day > 31) {
-          continue;
-        }
-
-        // 各値の安全な数値変換 (NaN や 無効値は 0 にフォールバック)
         const rawPrice = Number(customerPriceRow[col]);
         const custPrice = Number.isFinite(rawPrice) && rawPrice >= 0 ? Math.round(rawPrice) : 0;
 
@@ -474,7 +599,8 @@
           客単価: custPrice,
           客数: custCount,
           売上: sales,
-          colIndex: col
+          colIndex: col,
+          rawDateVal: dateVal
         });
       }
     }
@@ -482,6 +608,22 @@
     if (parsedData.length === 0) {
       return null;
     }
+
+    // 日番号（Day）による一意化（重複行の排除：実績売上・客数を持つ方を最優先）
+    const dayMap = {};
+    parsedData.forEach(function(item) {
+      const existing = dayMap[item.Day];
+      if (!existing) {
+        dayMap[item.Day] = item;
+      } else {
+        const existingSales = existing['売上'] || 0;
+        const newSales = item['売上'] || 0;
+        if (newSales > existingSales) {
+          dayMap[item.Day] = item;
+        }
+      }
+    });
+    parsedData = Object.values(dayMap);
 
     // 日付順に昇順ソート
     parsedData.sort(function(a, b) {
@@ -501,7 +643,13 @@
     parsedData.forEach(function(item) {
       let dow = null;
 
-      if (periodInfo.year && periodInfo.month) {
+      // 1. セル内の表記から曜日を直接抽出 (例: "01日", "02月", "03火")
+      if (item.rawDateVal) {
+        dow = extractWeekdayFromCell(item.rawDateVal);
+      }
+
+      // 2. 期間情報（年月）からの曜日算出
+      if (dow === null && periodInfo.year && periodInfo.month) {
         const dt = new Date(periodInfo.year, periodInfo.month - 1, item.Day);
         if (!isNaN(dt.getTime())) {
           dow = dt.getDay();
@@ -719,6 +867,8 @@
     resolveStandardStoreName: resolveStandardStoreName,
     normalizeStoreCore: normalizeStoreCore,
     getStoreStem: getStoreStem,
+    extractDayNumber: extractDayNumber,
+    extractWeekdayFromCell: extractWeekdayFromCell,
     parseSalesExcel: parseSalesExcel,
     parseAllStoreSheets: parseAllStoreSheets,
     extractPeriodInfo: extractPeriodInfo,

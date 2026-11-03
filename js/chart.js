@@ -134,9 +134,12 @@
    * @param {Array<{Day: number, 客単価: number, 客数: number, 売上: number}>} [baseData] - 昨年（基準データ、任意）
    */
   /**
-   * 今期と昨年の対比ペア一覧を安全に生成 (同日対比または同曜日対比)
-   * @param {Array} currentData - 今期
-   * @param {Array} baseData - 昨年
+   * 今期と昨年のデータを日付または同曜日ベースで対応付けたペア配列を生成
+   * 【重要方針】
+   * - 今期データ（curItem）は1日〜最大日数までスキップせず完全に固定表示
+   * - 昨年データ（baseItem）のみが「同日」または「同曜日」の対比方式に応じて連動切り替え
+   * @param {Array<{Day: number, 客単価: number, 客数: number, 売上: number, dayOfWeek?: number, weekday?: string}>} currentData - 今期
+   * @param {Array<{Day: number, 客単価: number, 客数: number, 売上: number, dayOfWeek?: number, weekday?: string}>} [baseData] - 昨年
    * @param {'date'|'weekday'} mode - 対比モード
    * @returns {Array<{ day: number, curItem: object|null, baseItem: object|null, curLabel: string, baseLabel: string }>}
    */
@@ -163,7 +166,7 @@
       baseData.forEach(function(item) { baseMap[item.Day] = item; });
     }
 
-    // 【同日数対比ルール】今期データの実績（売上>0 または 客数>0）が存在する最大営業日を特定
+    // 今期データの実績（売上>0 または 客数>0）が存在する最大営業日を特定
     let maxCurActiveDay = 0;
     if (hasCurrent) {
       currentData.forEach(function(item) {
@@ -175,16 +178,31 @@
       });
     }
 
-              // 基準データが存在する場合は、ベースとして基準データの月末(最大日数)までを描画する
-      let targetDisplayDays = maxDay;
-      if (!hasBase && hasCurrent && maxCurActiveDay > 0) {
-        // 基準データが無く今期のみの場合は、今期実績のある日までを描画
-        targetDisplayDays = maxCurActiveDay;
-      }
+    // 表示日数は基準データまたは今期最大日数（月末まで）を原則とする
+    let targetDisplayDays = maxDay;
+    if (!hasBase && hasCurrent && maxCurActiveDay > 0) {
+      // 基準データが無く今期のみの場合は、今期実績のある日までを描画
+      targetDisplayDays = maxCurActiveDay;
+    }
 
-    // 曜日対比の可否チェック (双方がdayOfWeekを持つか)
+    // 今期の初日（Day 1）の曜日を確実に判定
+    let curStartDow = null;
+    if (currentMap[1] && currentMap[1].dayOfWeek !== null && currentMap[1].dayOfWeek !== undefined) {
+      curStartDow = currentMap[1].dayOfWeek;
+    } else if (hasCurrent && currentData.periodInfo && currentData.periodInfo.year && currentData.periodInfo.month) {
+      const dt = new Date(currentData.periodInfo.year, currentData.periodInfo.month - 1, 1);
+      if (!isNaN(dt.getTime())) {
+        curStartDow = dt.getDay();
+      }
+    } else if (hasCurrent && currentData[0] && currentData[0].dayOfWeek !== null && currentData[0].dayOfWeek !== undefined) {
+      const firstItem = currentData[0];
+      const diffDays = firstItem.Day - 1;
+      curStartDow = (firstItem.dayOfWeek - (diffDays % 7) + 7) % 7;
+    }
+
+    // 曜日対比の可否チェック (双方がdayOfWeekを持つか、または算出可能か)
     const canWeekday = mode === 'weekday' && hasCurrent && hasBase &&
-      currentData.some(function(d) { return d.dayOfWeek !== null && d.dayOfWeek !== undefined; }) &&
+      (curStartDow !== null || currentData.some(function(d) { return d.dayOfWeek !== null && d.dayOfWeek !== undefined; })) &&
       baseData.some(function(d) { return d.dayOfWeek !== null && d.dayOfWeek !== undefined; });
 
     const weekdayBaseMap = {};
@@ -192,9 +210,6 @@
       // 【ユーザー指定の同曜日対比】
       // 「今月2026.09.01(火) に対比させる場合は 2025.09.02(火) に対比させ、一日ずれていくように同曜日で対比」
       // 開始日（Day 1）の曜日と一致する昨年の第1週の同曜日を探し、そのオフセットを維持して1日ずつスライド
-      const curFirst = currentMap[1] || currentData[0];
-      const curStartDow = (curFirst && curFirst.dayOfWeek !== null && curFirst.dayOfWeek !== undefined) ? curFirst.dayOfWeek : null;
-
       let baseStartDay = null;
       if (curStartDow !== null) {
         for (let bd = 1; bd <= 7; bd++) {
@@ -211,8 +226,8 @@
         if (d.Day > baseMaxDay) baseMaxDay = d.Day;
       });
 
-      if (baseStartDay !== null && curFirst) {
-        const offset = baseStartDay - curFirst.Day; // 例: 2026年9月1日(火) ⇔ 2025年9月2日(火) -> offset = +1
+      if (baseStartDay !== null) {
+        const offset = baseStartDay - 1; // 1日同士のオフセット（例: 2026年9月1日(火) ⇔ 2025年9月2日(火) -> offset = +1）
         for (let d = 1; d <= maxDay; d++) {
           let targetBaseDay = d + offset;
           // 月末で昨年データがはみ出る場合 (例: offset = +1 で d = 30 のとき targetBaseDay = 31 > 30)
@@ -236,10 +251,12 @@
         const curDowCount = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
         for (let d = 1; d <= maxDay; d++) {
           const cItem = currentMap[d];
-          if (cItem && cItem.dayOfWeek !== null && cItem.dayOfWeek !== undefined) {
-            const dow = cItem.dayOfWeek;
-            const idx = curDowCount[dow];
-            curDowCount[dow]++;
+          const dow = (cItem && cItem.dayOfWeek !== null && cItem.dayOfWeek !== undefined)
+            ? cItem.dayOfWeek
+            : (curStartDow !== null ? (curStartDow + (d - 1)) % 7 : null);
+          if (dow !== null) {
+            const idx = curDowCount[dow] || 0;
+            curDowCount[dow] = idx + 1;
             weekdayBaseMap[d] = (baseByDow[dow] && baseByDow[dow][idx]) || null;
           } else {
             weekdayBaseMap[d] = baseMap[d] || null;
@@ -267,12 +284,28 @@
       }
     }
 
+    const WEEKDAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'];
     const pairs = [];
     for (let d = 1; d <= targetDisplayDays; d++) {
+      // 今期データは常に d日 目をそのまま固定割り当て
       const curItem = currentMap[d] || null;
+      // 昨年データのみが対比方式（同日 vs 同曜日）に応じて切り替わる
       const baseItem = canWeekday ? (weekdayBaseMap[d] || null) : (baseMap[d] || null);
 
-      const curWeekdayStr = curItem && curItem.weekday ? '(' + curItem.weekday + ')' : '';
+      // 曜日文字列の安全な解決 (curItem が無くても日付から自動補完)
+      let curWeekdayStr = '';
+      if (curItem && curItem.weekday) {
+        curWeekdayStr = '(' + curItem.weekday + ')';
+      } else if (hasCurrent && currentData.periodInfo && currentData.periodInfo.year && currentData.periodInfo.month) {
+        const dt = new Date(currentData.periodInfo.year, currentData.periodInfo.month - 1, d);
+        if (!isNaN(dt.getTime())) {
+          curWeekdayStr = '(' + WEEKDAY_NAMES[dt.getDay()] + ')';
+        }
+      } else if (curStartDow !== null) {
+        const dow = (curStartDow + (d - 1)) % 7;
+        curWeekdayStr = '(' + WEEKDAY_NAMES[dow] + ')';
+      }
+
       const baseWeekdayStr = baseItem && baseItem.weekday ? '(' + baseItem.weekday + ')' : '';
 
       pairs.push({

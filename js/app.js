@@ -288,11 +288,14 @@
     initApp();
   });
 
+  const CURRENT_CACHE_VERSION = '20261103_v2';
+
   /**
    * 現在の店舗プロファイルに対応するデータをストレージへ永続化
    */
   function saveCurrentProfileState() {
     return AppStorage.saveProfileState(currentProfile, {
+      cacheVersion: CURRENT_CACHE_VERSION,
       baseDataSet: baseDataSet,
       baseFileName: baseFileName,
       compareDataSet: compareDataSet,
@@ -300,6 +303,21 @@
       comparisonMode: comparisonMode,
       savedAt: Date.now()
     });
+  }
+
+  /**
+   * キャッシュデータの健全性検証（古いパーサーによる1日欠損データの自動検出）
+   * @param {Array} dataSet
+   * @returns {boolean} true: 有効, false: 不正/破損キャッシュ
+   */
+  function isDataSetHealthy(dataSet) {
+    if (!Array.isArray(dataSet) || dataSet.length === 0) return true;
+    // 最初の営業日がDay 2以降で、かつ月次30日データ等の場合に1日欠損と判定
+    const minDay = dataSet.reduce(function(min, item) { return Math.min(min, item.Day || 99); }, 99);
+    if (minDay === 2 && dataSet.length >= 20) {
+      return false; // 1日がスキップされていた旧キャッシュ
+    }
+    return true;
   }
 
   /**
@@ -311,6 +329,19 @@
         clearDashboardUI();
         return;
       }
+
+      // バージョン不一致、または1日欠損キャッシュの検知時は古いキャッシュをパージ
+      const isBaseHealthy = isDataSetHealthy(state.baseDataSet);
+      const isCompHealthy = isDataSetHealthy(state.compareDataSet);
+      const isVersionMatch = state.cacheVersion === CURRENT_CACHE_VERSION;
+
+      if (!isVersionMatch || !isBaseHealthy || !isCompHealthy) {
+        AppStorage.clearProfileState(currentProfile);
+        clearDashboardUI();
+        showStatusMessage('パーサーの精度改善（1日欠損の解消）に伴いキャッシュを再初期化しました。最新のExcelファイルをドロップしてください。', 'info');
+        return;
+      }
+
       let restored = false;
       if (state.baseDataSet) {
         baseDataSet = state.baseDataSet;
@@ -1200,16 +1231,15 @@
           }
         }
 
-        // 現在選択中の店舗データを全店舗データから再抽出（単一店舗ビュー用）
-        if (allStoresParsed.stores && allStoresParsed.stores[currentProfile]) {
-          if (targetSlot === 'base') {
-            baseDataSet = allStoresParsed.stores[currentProfile];
-          } else {
-            compareDataSet = allStoresParsed.stores[currentProfile];
-          }
-          ensureWeekdayData(baseDataSet, baseFileName);
-          ensureWeekdayData(compareDataSet, compareFileName);
+        // 現在選択中の店舗データを全店舗データから確実に同期（単一店舗ビュー用）
+        if (baseAllStores && baseAllStores.stores && baseAllStores.stores[currentProfile]) {
+          baseDataSet = baseAllStores.stores[currentProfile];
         }
+        if (compareAllStores && compareAllStores.stores && compareAllStores.stores[currentProfile]) {
+          compareDataSet = compareAllStores.stores[currentProfile];
+        }
+        ensureWeekdayData(baseDataSet, baseFileName);
+        ensureWeekdayData(compareDataSet, compareFileName);
 
         // 表示ビューに応じたレンダリング
         if (currentViewMode === 'kanban') {
