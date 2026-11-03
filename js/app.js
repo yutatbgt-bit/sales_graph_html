@@ -283,6 +283,73 @@
   let currentProfile = AppStorage.DEFAULT_PROFILE_NAME;
   let storeProfiles = [AppStorage.DEFAULT_PROFILE_NAME];
   let profileDialogMode = 'add'; // 'add' | 'rename'
+  let pendingBulkSavePromise = null;
+  let isSwitchingStore = false;
+
+  function isAllStoreLabel(name) {
+    if (!name || typeof name !== 'string') return false;
+    return /^(?:全店|全体|合計|全店舗|all|allstore|全社|全)$/i.test(name.trim().replace(/[\s　_\-]/g, ''));
+  }
+
+  /**
+   * 複数シート解析キャッシュから対象店舗のデータを厳格に取得（全店と個別店舗の混同を完全遮断）
+   */
+  function getStoreDataFromMultiSheetCache(cacheObj, targetStoreName) {
+    if (!cacheObj || !cacheObj.stores || !targetStoreName) return null;
+    if (cacheObj.stores[targetStoreName]) {
+      return cacheObj.stores[targetStoreName];
+    }
+    if (global.SalesParser && typeof global.SalesParser.matchStoreName === 'function') {
+      const targetIsAll = isAllStoreLabel(targetStoreName);
+      for (const k in cacheObj.stores) {
+        if (!Object.prototype.hasOwnProperty.call(cacheObj.stores, k)) continue;
+        if (isAllStoreLabel(k) !== targetIsAll) continue;
+        if (global.SalesParser.matchStoreName(k, [targetStoreName]) === targetStoreName) {
+          return cacheObj.stores[k];
+        }
+      }
+    }
+    return null;
+  }
+
+  function renameStoreInMemoryCache(cacheObj, oldName, newName) {
+    if (!cacheObj || !oldName || !newName || oldName === newName) return;
+    if (cacheObj.stores && Object.prototype.hasOwnProperty.call(cacheObj.stores, oldName)) {
+      cacheObj.stores[newName] = cacheObj.stores[oldName];
+      delete cacheObj.stores[oldName];
+    }
+    if (Array.isArray(cacheObj.storeNames)) {
+      cacheObj.storeNames = cacheObj.storeNames.map(function(n) {
+        return n === oldName ? newName : n;
+      });
+    }
+  }
+
+  function deleteStoreFromMemoryCache(cacheObj, targetName) {
+    if (!cacheObj || !targetName) return;
+    if (cacheObj.stores) {
+      delete cacheObj.stores[targetName];
+      if (global.SalesParser && typeof global.SalesParser.matchStoreName === 'function') {
+        const targetIsAll = isAllStoreLabel(targetName);
+        Object.keys(cacheObj.stores).forEach(function(k) {
+          if (isAllStoreLabel(k) === targetIsAll && global.SalesParser.matchStoreName(k, [targetName]) === targetName) {
+            delete cacheObj.stores[k];
+          }
+        });
+      }
+    }
+    if (Array.isArray(cacheObj.storeNames)) {
+      cacheObj.storeNames = cacheObj.storeNames.filter(function(n) {
+        if (n === targetName) return false;
+        if (global.SalesParser && typeof global.SalesParser.matchStoreName === 'function') {
+          if (isAllStoreLabel(n) === isAllStoreLabel(targetName) && global.SalesParser.matchStoreName(n, [targetName]) === targetName) {
+            return false;
+          }
+        }
+        return true;
+      });
+    }
+  }
 
   document.addEventListener('DOMContentLoaded', function() {
     initApp();
@@ -365,7 +432,21 @@
       }
 
       if (restored) {
-        updateDashboardView();
+        if (currentViewMode === 'kanban') {
+          ensureWeekdayData(baseDataSet, baseFileName);
+          ensureWeekdayData(compareDataSet, compareFileName);
+          updateFilePill('file-name-base', baseDataSet, baseFileName, '基準(昨年)');
+          updateFilePill('file-name-compare', compareDataSet, compareFileName, '比較(今期)');
+          const hasCompare = !!(compareDataSet && compareDataSet.length > 0);
+          const primaryData = hasCompare ? compareDataSet : baseDataSet;
+          const secondaryData = hasCompare ? baseDataSet : null;
+          if (primaryData && global.SalesChart && typeof global.SalesChart.buildComparisonPairs === 'function') {
+            const pairs = global.SalesChart.buildComparisonPairs(primaryData, secondaryData, comparisonMode);
+            updateKpiCards(pairs, primaryData, secondaryData, comparisonMode);
+          }
+        } else {
+          updateDashboardView();
+        }
         showStatusMessage('【' + currentProfile + '】の前回保存データを復元しました。', 'info');
       } else {
         clearDashboardUI();
@@ -580,6 +661,10 @@
   async function switchProfile(targetProfile) {
     if (!targetProfile || targetProfile === currentProfile) return;
 
+    if (pendingBulkSavePromise) {
+      try { await pendingBulkSavePromise; } catch (e) {}
+    }
+
     // 現在の店舗データを保存
     if (baseDataSet || compareDataSet) {
       await saveCurrentProfileState();
@@ -597,6 +682,11 @@
     clearDashboardUI();
 
     await restorePersistedData();
+
+    // 全店同時比較カンバンビュー表示中は各店舗固有グラフ・連携バッジを再描画して同期維持
+    if (currentViewMode === 'kanban') {
+      await renderKanbanView();
+    }
   }
 
   function setupProfileEvents() {
@@ -798,6 +888,8 @@
         await AppStorage.saveProfileState(rawName, currentState);
         await AppStorage.deleteProfile(oldName);
       }
+      renameStoreInMemoryCache(baseAllStores, oldName, rawName);
+      renameStoreInMemoryCache(compareAllStores, oldName, rawName);
 
       const idx = storeProfiles.indexOf(oldName);
       if (idx !== -1) {
@@ -862,8 +954,10 @@
 
     const targetName = currentProfile;
 
-    // ストレージから対象店舗データを削除
+    // ストレージおよびメモリキャッシュから対象店舗データを削除
     await AppStorage.deleteProfile(targetName);
+    deleteStoreFromMemoryCache(baseAllStores, targetName);
+    deleteStoreFromMemoryCache(compareAllStores, targetName);
 
     // 店舗プロファイルリストから除外
     storeProfiles = storeProfiles.filter(function(p) { return p !== targetName; });
@@ -1148,8 +1242,8 @@
       try {
         const buffer = e.target.result;
         const allStoresParsed = global.SalesParser.parseAllStoreSheets(buffer, fileName, storeProfiles, currentProfile);
-        const singleParsed = (allStoresParsed.stores && allStoresParsed.stores[currentProfile]) ||
-                             (allStoresParsed.stores && allStoresParsed.stores['全店']) ||
+        const singleParsed = getStoreDataFromMultiSheetCache(allStoresParsed, currentProfile) ||
+                             getStoreDataFromMultiSheetCache(allStoresParsed, '全店') ||
                              global.SalesParser.parseSalesExcel(buffer, fileName, currentProfile);
 
         if (!singleParsed || singleParsed.length === 0) {
@@ -1168,55 +1262,12 @@
           compareAllStores = allStoresParsed;
         }
 
-        // 店舗プロファイルリストの自動拡張（ファイル内の新規検出店舗を追加順に登録、ただしSheet1等の汎用シート名は除外）
-        if (allStoresParsed.storeNames && allStoresParsed.storeNames.length > 0) {
-          let profilesChanged = false;
-          allStoresParsed.storeNames.forEach(function(sName) {
-            if (!sName || typeof sName !== 'string') return;
-            const trimmed = sName.trim();
-            if (/^(?:sheet\s*\d*|シート\s*\d*|page\s*\d*|table\s*\d*|ワークシート\d*)$/i.test(trimmed)) {
-              return;
-            }
-            if (!storeProfiles.includes(trimmed)) {
-              storeProfiles.push(trimmed);
-              profilesChanged = true;
-            }
-          });
-          if (profilesChanged) {
-            renderProfileSelect();
-            AppStorage.saveProfiles(storeProfiles);
-          }
-        }
-
-        // ファイル内の全店舗データを各店舗プロファイルストレージへその都度自動保存・同期
-        if (allStoresParsed.stores && allStoresParsed.storeNames) {
-          allStoresParsed.storeNames.forEach(function(sName) {
-            const sData = allStoresParsed.stores[sName];
-            if (sData && sData.length > 0) {
-              AppStorage.loadProfileState(sName).then(function(prevState) {
-                const updated = prevState || {};
-                if (targetSlot === 'base') {
-                  updated.baseDataSet = sData;
-                  updated.baseFileName = fileName;
-                } else {
-                  updated.compareDataSet = sData;
-                  updated.compareFileName = fileName;
-                }
-                updated.comparisonMode = comparisonMode;
-                updated.savedAt = Date.now();
-                AppStorage.saveProfileState(sName, updated);
-              });
-            }
-          });
-        }
-
         // 2つのファイルが存在する場合、期間チェック（古い方を基準、新しい方を比較に自動調整）
         let swapped = false;
         if (baseDataSet && compareDataSet) {
           const baseKey = (baseDataSet.periodInfo && baseDataSet.periodInfo.dateKey) || 0;
           const compKey = (compareDataSet.periodInfo && compareDataSet.periodInfo.dateKey) || 0;
 
-          // 基準データの方が新しい日付である場合、意図通りスワップ
           if (baseKey > 0 && compKey > 0 && baseKey > compKey) {
             const tempSet = baseDataSet;
             const tempName = baseFileName;
@@ -1231,25 +1282,106 @@
           }
         }
 
-        // 現在選択中の店舗データを全店舗データから確実に同期（単一店舗ビュー用）
-        if (baseAllStores && baseAllStores.stores && baseAllStores.stores[currentProfile]) {
-          baseDataSet = baseAllStores.stores[currentProfile];
+        // 店舗プロファイルリストの自動拡張（既存登録店舗との表記ゆれ名寄せを行い、重複プロファイル増殖を防止）
+        if (allStoresParsed.storeNames && allStoresParsed.storeNames.length > 0) {
+          let profilesChanged = false;
+          allStoresParsed.storeNames.forEach(function(sName) {
+            if (!sName || typeof sName !== 'string') return;
+            const trimmed = sName.trim();
+            if (!trimmed) return;
+            if (global.SalesParser && typeof global.SalesParser.isGenericOrSystemSheet === 'function' && global.SalesParser.isGenericOrSystemSheet(trimmed)) {
+              return;
+            }
+            const matched = (global.SalesParser && typeof global.SalesParser.matchStoreName === 'function')
+              ? global.SalesParser.matchStoreName(trimmed, storeProfiles)
+              : null;
+            const canonicalName = (matched && storeProfiles.includes(matched)) ? matched : trimmed;
+            if (!storeProfiles.includes(canonicalName)) {
+              storeProfiles.push(canonicalName);
+              profilesChanged = true;
+            }
+          });
+          if (profilesChanged) {
+            renderProfileSelect();
+            AppStorage.saveProfiles(storeProfiles);
+          }
         }
-        if (compareAllStores && compareAllStores.stores && compareAllStores.stores[currentProfile]) {
-          compareDataSet = compareAllStores.stores[currentProfile];
+
+        // 現在選択中の店舗データを全店舗データから確実に同期（単一店舗ビュー用）
+        const syncedBase = getStoreDataFromMultiSheetCache(baseAllStores, currentProfile);
+        if (syncedBase && syncedBase.length > 0) {
+          baseDataSet = syncedBase;
+        }
+        const syncedComp = getStoreDataFromMultiSheetCache(compareAllStores, currentProfile);
+        if (syncedComp && syncedComp.length > 0) {
+          compareDataSet = syncedComp;
         }
         ensureWeekdayData(baseDataSet, baseFileName);
         ensureWeekdayData(compareDataSet, compareFileName);
 
+        // ファイル内の全店舗データを各店舗プロファイルストレージへ自動保存・同期（cacheVersion・期間スワップ完全整合）
+        const storesToSync = new Set();
+        if (swapped) {
+          if (baseAllStores && Array.isArray(baseAllStores.storeNames)) {
+            baseAllStores.storeNames.forEach(function(n) { storesToSync.add(n); });
+          }
+          if (compareAllStores && Array.isArray(compareAllStores.storeNames)) {
+            compareAllStores.storeNames.forEach(function(n) { storesToSync.add(n); });
+          }
+        } else if (allStoresParsed.storeNames) {
+          allStoresParsed.storeNames.forEach(function(n) { storesToSync.add(n); });
+        }
+
+        const saveTasks = [];
+        storesToSync.forEach(function(rawStoreName) {
+          const matched = (global.SalesParser && typeof global.SalesParser.matchStoreName === 'function')
+            ? global.SalesParser.matchStoreName(rawStoreName, storeProfiles)
+            : null;
+          const canonicalName = (matched && storeProfiles.includes(matched)) ? matched : rawStoreName;
+
+          const bData = swapped
+            ? getStoreDataFromMultiSheetCache(baseAllStores, canonicalName)
+            : (targetSlot === 'base' ? getStoreDataFromMultiSheetCache(allStoresParsed, canonicalName) : null);
+          const cData = swapped
+            ? getStoreDataFromMultiSheetCache(compareAllStores, canonicalName)
+            : (targetSlot === 'compare' ? getStoreDataFromMultiSheetCache(allStoresParsed, canonicalName) : null);
+
+          if ((bData && bData.length > 0) || (cData && cData.length > 0)) {
+            const task = AppStorage.loadProfileState(canonicalName).then(function(prevState) {
+              const updated = (prevState && prevState.cacheVersion === CURRENT_CACHE_VERSION) ? prevState : {};
+              updated.cacheVersion = CURRENT_CACHE_VERSION;
+              if (bData && bData.length > 0) {
+                ensureWeekdayData(bData, baseFileName);
+                updated.baseDataSet = bData;
+                updated.baseFileName = baseFileName;
+              }
+              if (cData && cData.length > 0) {
+                ensureWeekdayData(cData, compareFileName);
+                updated.compareDataSet = cData;
+                updated.compareFileName = compareFileName;
+              }
+              updated.comparisonMode = comparisonMode;
+              updated.savedAt = Date.now();
+              return AppStorage.saveProfileState(canonicalName, updated);
+            });
+            saveTasks.push(task);
+          }
+        });
+        saveTasks.push(saveCurrentProfileState());
+        pendingBulkSavePromise = Promise.all(saveTasks).catch(function(err) {
+          console.warn('[handleFileSelected] bulk save error:', err);
+        });
+
         // 表示ビューに応じたレンダリング
         if (currentViewMode === 'kanban') {
-          renderKanbanView();
+          pendingBulkSavePromise.then(function() {
+            if (currentViewMode === 'kanban') {
+              renderKanbanView();
+            }
+          });
         } else {
           updateDashboardView();
         }
-
-        // 店舗プロファイルへ非同期永続化保存
-        saveCurrentProfileState();
 
         const periodText = singleParsed.periodInfo && singleParsed.periodInfo.label ? ' (' + singleParsed.periodInfo.label + ')' : '';
         const storeCountText = allStoresParsed.storeNames && allStoresParsed.storeNames.length > 1
@@ -1282,8 +1414,8 @@
     compareDataSet = null;
     baseFileName = '';
     compareFileName = '';
-    baseAllStores = null;
-    compareAllStores = null;
+    deleteStoreFromMemoryCache(baseAllStores, currentProfile);
+    deleteStoreFromMemoryCache(compareAllStores, currentProfile);
 
     if (global.SalesChart && typeof global.SalesChart.destroyKanbanCharts === 'function') {
       global.SalesChart.destroyKanbanCharts();
@@ -1371,6 +1503,81 @@
   }
 
   /**
+   * 指定した店舗プロファイルの個別店舗ビューへ切り替え（動的リンク・ハードコード完全排除）
+   * @param {string} targetStoreName - 移動先店舗名
+   */
+  async function selectStoreAndSwitchToSingleView(targetStoreName) {
+    if (isSwitchingStore) return;
+    if (!targetStoreName || typeof targetStoreName !== 'string') return;
+    const cleanName = targetStoreName.trim();
+    if (!cleanName) return;
+
+    isSwitchingStore = true;
+    try {
+      if (pendingBulkSavePromise) {
+        try { await pendingBulkSavePromise; } catch (e) {}
+      }
+
+      // 既存店舗プロファイルへの動的照合（追加・名称変更・削除に完全連動）
+      const matchedName = (global.SalesParser && typeof global.SalesParser.matchStoreName === 'function')
+        ? global.SalesParser.matchStoreName(cleanName, storeProfiles)
+        : null;
+      const resolvedName = (matchedName && storeProfiles.includes(matchedName)) ? matchedName : cleanName;
+
+      if (!storeProfiles.includes(resolvedName)) {
+        storeProfiles.push(resolvedName);
+        await AppStorage.saveProfiles(storeProfiles);
+      }
+
+      // 現在の店舗データを保存してから移動
+      if (baseDataSet || compareDataSet) {
+        await saveCurrentProfileState();
+      }
+
+      currentProfile = resolvedName;
+      setHashProfile(currentProfile);
+      renderProfileSelect();
+
+      baseDataSet = null;
+      compareDataSet = null;
+      baseFileName = '';
+      compareFileName = '';
+      clearDashboardUI();
+
+      // Canvas領域を可視状態にしてからデータを復元・描画（0px描画防止）
+      switchViewMode('single');
+
+      await restorePersistedData();
+
+      // ストレージ未保存で複数シートメモリキャッシュ上に存在する場合のフォールバック補完
+      let fallbackApplied = false;
+      if (!compareDataSet && compareAllStores) {
+        const memComp = getStoreDataFromMultiSheetCache(compareAllStores, currentProfile);
+        if (memComp && memComp.length > 0) {
+          compareDataSet = memComp;
+          compareFileName = compareAllStores.fileName || '';
+          fallbackApplied = true;
+        }
+      }
+      if (!baseDataSet && baseAllStores) {
+        const memBase = getStoreDataFromMultiSheetCache(baseAllStores, currentProfile);
+        if (memBase && memBase.length > 0) {
+          baseDataSet = memBase;
+          baseFileName = baseAllStores.fileName || '';
+          fallbackApplied = true;
+        }
+      }
+      if (fallbackApplied) {
+        updateDashboardView();
+      }
+
+      showStatusMessage('店舗「' + currentProfile + '」の個別店舗ビューを表示しました。', 'info');
+    } finally {
+      isSwitchingStore = false;
+    }
+  }
+
+  /**
    * 登録店舗の2列カンバンビューを描画
    * ユーザー要件:
    * - データが入っている店舗のみを2列カンバンビューで表示
@@ -1411,15 +1618,14 @@
       if (Array.isArray(allPersisted)) {
         allPersisted.forEach(function(item) {
           if (item && item.state) {
-            const hasData = (item.state.compareDataSet && item.state.compareDataSet.length > 0) ||
-                            (item.state.baseDataSet && item.state.baseDataSet.length > 0);
+            const isHealthy = isDataSetHealthy(item.state.baseDataSet) && isDataSetHealthy(item.state.compareDataSet);
+            const hasData = isHealthy && (
+              (item.state.compareDataSet && item.state.compareDataSet.length > 0) ||
+              (item.state.baseDataSet && item.state.baseDataSet.length > 0)
+            );
             if (hasData) {
               hasPersistedData = true;
               persistedMap[item.profileName] = item.state;
-              if (global.SalesParser && typeof global.SalesParser.resolveStandardStoreName === 'function') {
-                const std = global.SalesParser.resolveStandardStoreName(item.profileName);
-                if (std) persistedMap[std] = item.state;
-              }
             }
           }
         });
@@ -1462,11 +1668,25 @@
     function addStore(name) {
       if (!name || typeof name !== 'string') return;
       const trimmed = name.trim();
-      if (!trimmed || trimmed === 'デフォルト') return;
-      if (!seenStores.has(trimmed)) {
-        seenStores.add(trimmed);
-        storeNames.push(trimmed);
+      if (!trimmed || trimmed === 'デフォルト' || trimmed === '空店舗') return;
+      if (global.SalesParser && typeof global.SalesParser.isGenericOrSystemSheet === 'function' && global.SalesParser.isGenericOrSystemSheet(trimmed)) {
+        return;
       }
+      if (seenStores.has(trimmed)) return;
+      if (storeNames.length > 0 && global.SalesParser && typeof global.SalesParser.matchStoreName === 'function') {
+        const targetIsAll = isAllStoreLabel(trimmed);
+        const sameCategoryCandidates = storeNames.filter(function(s) {
+          return isAllStoreLabel(s) === targetIsAll;
+        });
+        if (sameCategoryCandidates.length > 0) {
+          const existingMatch = global.SalesParser.matchStoreName(trimmed, sameCategoryCandidates);
+          if (existingMatch && seenStores.has(existingMatch)) {
+            return;
+          }
+        }
+      }
+      seenStores.add(trimmed);
+      storeNames.push(trimmed);
     }
 
     // 1. ユーザーが追加した店舗プロファイルを「追加された順番」で最優先に登録
@@ -1504,45 +1724,54 @@
       let curFileName = compareFileName;
       let baseFileNameToUse = baseFileName;
 
-      // 1. 直近アップロードされたファイル内のシートデータ（表記ゆれ自動解決）
-      if (compareAllStores && compareAllStores.stores) {
-        curData = compareAllStores.stores[storeName];
-        if (!curData && global.SalesParser && global.SalesParser.resolveStandardStoreName) {
-          for (const k in compareAllStores.stores) {
-            if (global.SalesParser.resolveStandardStoreName(k) === storeName) {
-              curData = compareAllStores.stores[k];
-              break;
-            }
-          }
-        }
-      }
-      if (baseAllStores && baseAllStores.stores) {
-        baseData = baseAllStores.stores[storeName];
-        if (!baseData && global.SalesParser && global.SalesParser.resolveStandardStoreName) {
-          for (const k in baseAllStores.stores) {
-            if (global.SalesParser.resolveStandardStoreName(k) === storeName) {
-              baseData = baseAllStores.stores[k];
-              break;
-            }
+      // 1. 店舗プロファイル（ストレージ保存データ）を最優先で厳密照合
+      let savedState = persistedMap[storeName];
+      if (!savedState && global.SalesParser && typeof global.SalesParser.matchStoreName === 'function') {
+        const targetIsAll = isAllStoreLabel(storeName);
+        for (const k in persistedMap) {
+          if (!Object.prototype.hasOwnProperty.call(persistedMap, k)) continue;
+          if (isAllStoreLabel(k) !== targetIsAll) continue;
+          if (global.SalesParser.matchStoreName(k, [storeName]) === storeName) {
+            savedState = persistedMap[k];
+            break;
           }
         }
       }
 
-      // 2. 店舗プロファイル（ストレージ保存データ）からの補完
-      const savedState = persistedMap[storeName];
       if (savedState) {
-        if (!curData && savedState.compareDataSet && savedState.compareDataSet.length > 0) {
+        if (savedState.compareDataSet && savedState.compareDataSet.length > 0) {
           curData = savedState.compareDataSet;
           if (savedState.compareFileName) curFileName = savedState.compareFileName;
         }
-        if (!baseData && savedState.baseDataSet && savedState.baseDataSet.length > 0) {
+        if (savedState.baseDataSet && savedState.baseDataSet.length > 0) {
           baseData = savedState.baseDataSet;
           if (savedState.baseFileName) baseFileNameToUse = savedState.baseFileName;
         }
       }
 
-      // 3. 現在アクティブな店舗プロファイルのメモリ上データ
-      if (storeName === currentProfile || (storeName === '全店' && !curData && !baseData && (currentProfile === 'デフォルト' || currentProfile === '全店'))) {
+      // 2. 直近アップロードされた複数シートファイルからの補完（全店・他店混同防止済み）
+      if (!curData && compareAllStores) {
+        const sheetCur = getStoreDataFromMultiSheetCache(compareAllStores, storeName);
+        if (sheetCur && sheetCur.length > 0) {
+          curData = sheetCur;
+          if (compareAllStores.fileName) curFileName = compareAllStores.fileName;
+        }
+      }
+      if (!baseData && baseAllStores) {
+        const sheetBase = getStoreDataFromMultiSheetCache(baseAllStores, storeName);
+        if (sheetBase && sheetBase.length > 0) {
+          baseData = sheetBase;
+          if (baseAllStores.fileName) baseFileNameToUse = baseAllStores.fileName;
+        }
+      }
+
+      // 3. 現在アクティブな店舗プロファイルのメモリ上データ（storeName が現在選択店舗と一致する場合のみ限定適用）
+      const isCurrentStore = (storeName === currentProfile) ||
+        (isAllStoreLabel(storeName) === isAllStoreLabel(currentProfile) &&
+         global.SalesParser && typeof global.SalesParser.matchStoreName === 'function' &&
+         global.SalesParser.matchStoreName(storeName, [currentProfile]) === currentProfile);
+
+      if (isCurrentStore) {
         if (!curData && compareDataSet && compareDataSet.length > 0) {
           curData = compareDataSet;
         }
@@ -1563,16 +1792,140 @@
       ensureWeekdayData(baseData, baseFileNameToUse);
 
       const card = document.createElement('div');
-      card.className = 'kanban-card has-data';
+      card.className = 'kanban-card has-data clickable-card';
+      card.setAttribute('role', 'button');
+      card.setAttribute('tabindex', '0');
+      card.setAttribute('aria-label', storeName + ' の個別店舗ビューを表示');
+      card.setAttribute('title', 'クリックして「' + storeName + '」の個別店舗ビューを表示');
 
-      // ヘッダー: 店舗名のみ表示 (ユーザー要求: 余計な日付対比文字列や項目選択チップは一切不要)
+      // カードクリックで個別店舗ビューへ動的リンク遷移（ハードコード完全排除）
+      card.addEventListener('click', function() {
+        selectStoreAndSwitchToSingleView(storeName);
+      });
+
+      // キーボードアクセシビリティ対応 (Enter / Space)
+      card.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          selectStoreAndSwitchToSingleView(storeName);
+        }
+      });
+
       const header = document.createElement('div');
       header.className = 'kanban-card-header';
+
+      // 店舗名 + 移動アイコン + 累計対比バッジ（売上対比・客数対比）のラッパー
+      const titleWrap = document.createElement('div');
+      titleWrap.className = 'kanban-title-wrap';
 
       const title = document.createElement('h4');
       title.className = 'kanban-store-title';
       title.textContent = storeName;
-      header.appendChild(title);
+
+      // リンク移動アイコン（SVG）を安全な createElementNS で構築
+      const linkIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      linkIcon.setAttribute('class', 'kanban-store-link-icon');
+      linkIcon.setAttribute('width', '13');
+      linkIcon.setAttribute('height', '13');
+      linkIcon.setAttribute('viewBox', '0 0 24 24');
+      linkIcon.setAttribute('fill', 'none');
+      linkIcon.setAttribute('stroke', 'currentColor');
+      linkIcon.setAttribute('stroke-width', '2');
+      linkIcon.setAttribute('stroke-linecap', 'round');
+      linkIcon.setAttribute('stroke-linejoin', 'round');
+      linkIcon.setAttribute('aria-hidden', 'true');
+      const p1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      p1.setAttribute('d', 'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6');
+      const p2 = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+      p2.setAttribute('points', '15 3 21 3 21 9');
+      const p3 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      p3.setAttribute('x1', '10');
+      p3.setAttribute('y1', '14');
+      p3.setAttribute('x2', '21');
+      p3.setAttribute('y2', '3');
+      linkIcon.appendChild(p1);
+      linkIcon.appendChild(p2);
+      linkIcon.appendChild(p3);
+      title.appendChild(linkIcon);
+
+      titleWrap.appendChild(title);
+
+      // 今期有効営業日までの累計売上対比・客数対比を算出（KPIカード・詳細表の合計対比と完全同一基準）
+      let useSalesCur = null;
+      let useSalesBase = null;
+      let useCountCur = null;
+      let useCountBase = null;
+      let activeDaysCount = 0;
+
+      if (curData && curData.length > 0 && baseData && baseData.length > 0 &&
+          global.SalesChart && typeof global.SalesChart.buildComparisonPairs === 'function') {
+        const storePairs = global.SalesChart.buildComparisonPairs(curData, baseData, comparisonMode);
+        let pairCurSales = 0;
+        let pairBaseSales = 0;
+        let pairCurCount = 0;
+        let pairBaseCount = 0;
+
+        storePairs.forEach(function(p) {
+          const c = p.curItem;
+          const b = p.baseItem;
+          const cSales = c ? (c['売上'] || 0) : 0;
+          const cCount = c ? (c['客数'] || 0) : 0;
+
+          if (cSales > 0 || cCount > 0) {
+            activeDaysCount += 1;
+            pairCurSales += cSales;
+            pairCurCount += cCount;
+            if (b) {
+              pairBaseSales += (b['売上'] || 0);
+              pairBaseCount += (b['客数'] || 0);
+            }
+          }
+        });
+
+        const curSummary = summarizeData(curData);
+        useSalesCur = pairCurSales > 0 ? pairCurSales : (curSummary ? curSummary.totalSales : 0);
+        useSalesBase = pairBaseSales;
+        useCountCur = pairCurCount > 0 ? pairCurCount : (curSummary ? curSummary.totalCustomers : 0);
+        useCountBase = pairBaseCount;
+      }
+
+      function createStatBadge(label, curVal, baseVal, isYen) {
+        const badge = document.createElement('span');
+        badge.className = 'kanban-stat-badge badge-neutral';
+
+        if (typeof curVal === 'number' && Number.isFinite(curVal) &&
+            typeof baseVal === 'number' && Number.isFinite(baseVal) && baseVal > 0) {
+          const ratioVal = (curVal / baseVal) * 100;
+          if (Number.isFinite(ratioVal)) {
+            const diff = curVal - baseVal;
+            const tone = diff > 0 ? 'badge-up' : (diff < 0 ? 'badge-down' : 'badge-neutral');
+            badge.className = 'kanban-stat-badge ' + tone;
+            badge.textContent = label + ' ' + ratioVal.toFixed(1) + '%';
+
+            const curStr = isYen
+              ? ('¥' + Math.round(curVal).toLocaleString())
+              : (Math.round(curVal).toLocaleString() + '人');
+            const baseStr = isYen
+              ? ('¥' + Math.round(baseVal).toLocaleString())
+              : (Math.round(baseVal).toLocaleString() + '人');
+            const modeLabel = (comparisonMode === 'weekday' ? '同曜日・同日数' : '同日・同日数') +
+              (activeDaysCount > 0 ? ' (' + activeDaysCount + '日分)' : '');
+            badge.setAttribute('title', label + ' [' + modeLabel + ']\n今期: ' + curStr + ' ／ 昨年: ' + baseStr);
+            return badge;
+          }
+        }
+
+        badge.textContent = label + ' -';
+        return badge;
+      }
+
+      const badgesWrap = document.createElement('div');
+      badgesWrap.className = 'kanban-stats-badges';
+      badgesWrap.appendChild(createStatBadge('売上対比', useSalesCur, useSalesBase, true));
+      badgesWrap.appendChild(createStatBadge('客数対比', useCountCur, useCountBase, false));
+      titleWrap.appendChild(badgesWrap);
+
+      header.appendChild(titleWrap);
 
       if (storeName === '全店') {
         const tag = document.createElement('span');
@@ -1601,8 +1954,18 @@
       card.appendChild(chartWrapper);
       kanbanGrid.appendChild(card);
 
+      // グラフ領域（ラッパー・Canvas・Chart.js onClick）クリックによる個別店舗ビューへの動的リンク遷移
+      const handleStoreSelect = function(e) {
+        if (e) e.stopPropagation();
+        selectStoreAndSwitchToSingleView(storeName);
+      };
+      chartWrapper.addEventListener('click', handleStoreSelect);
+      canvas.addEventListener('click', handleStoreSelect);
+
       // チャート描画
-      global.SalesChart.renderKanbanChart(canvas, curData, baseData, comparisonMode);
+      global.SalesChart.renderKanbanChart(canvas, curData, baseData, comparisonMode, function() {
+        selectStoreAndSwitchToSingleView(storeName);
+      });
     });
 
     // データが存在する店舗が1つもない場合のフォールバック表示
@@ -1780,6 +2143,7 @@
     if (!baseDataSet && !baseFileName) return;
     baseDataSet = null;
     baseFileName = '';
+    deleteStoreFromMemoryCache(baseAllStores, currentProfile);
     const fileInputBase = document.getElementById('file-input-base');
     if (fileInputBase) fileInputBase.value = '';
     updateFilePill('file-name-base', null, '', '');
@@ -1790,7 +2154,9 @@
       return;
     }
     updateDashboardView();
-    saveCurrentProfileState();
+    saveCurrentProfileState().then(function() {
+      if (currentViewMode === 'kanban') renderKanbanView();
+    });
     showStatusMessage('基準データを削除しました。', 'info');
   }
 
@@ -1801,6 +2167,7 @@
     if (!compareDataSet && !compareFileName) return;
     compareDataSet = null;
     compareFileName = '';
+    deleteStoreFromMemoryCache(compareAllStores, currentProfile);
     const fileInputCompare = document.getElementById('file-input-compare');
     if (fileInputCompare) fileInputCompare.value = '';
     updateFilePill('file-name-compare', null, '', '');
@@ -1811,7 +2178,9 @@
       return;
     }
     updateDashboardView();
-    saveCurrentProfileState();
+    saveCurrentProfileState().then(function() {
+      if (currentViewMode === 'kanban') renderKanbanView();
+    });
     showStatusMessage('比較日データを削除しました。', 'info');
   }
 

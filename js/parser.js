@@ -263,10 +263,19 @@
    */
   function normalizeStoreCore(str) {
     if (!str || typeof str !== 'string') return '';
+    const isYearPrefixed = /^\s*20\d{2}[年\/\-.]/.test(str);
     // 不可視制御文字・空白・記号を除去、半角小文字化
     let s = normalizeText(str)
       .toLowerCase()
       .replace(/[\u200B-\u200D\uFEFF\x00-\x1F\s　_\-\(\)（）\[\]【】]/g, '');
+
+    // 先頭の店舗コード数字（例: "012-夙川店" -> "夙川店"）を除去（年号始まりや数字のみの名称は保護）
+    if (!isYearPrefixed) {
+      const withoutCode = s.replace(/^\d+/, '');
+      if (withoutCode.length >= 2) {
+        s = withoutCode;
+      }
+    }
 
     // カタカナをひらがなに統一（動的なかな・カナ揺れ吸収）
     s = s.replace(/[\u30a1-\u30f6]/g, function(match) {
@@ -304,8 +313,9 @@
     const rawClean = rawName.trim();
     if (!rawClean) return null;
 
-    // 「全店」系の汎用判定（全店、全体、合計、all store 等）
-    const isAllStore = /^(?:全店|全体|合計|全店舗|all|allstore|全社|全)$/i.test(rawClean.replace(/[\s　_\-]/g, ''));
+    // 「全店」系の汎用判定（全店、全体、合計、全店舗、all store 等）
+    const isAllStore = /^(?:全店|全体|合計|全店舗|all|allstore|全社|全)$/i.test(rawClean.replace(/[\s　_\-]/g, '')) ||
+                       /(?:全店舗|全店|全社)/.test(rawClean);
     if (isAllStore) {
       if (Array.isArray(candidates)) {
         for (let i = 0; i < candidates.length; i++) {

@@ -836,9 +836,10 @@
    * @param {Array} currentData - 今期データ
    * @param {Array} [baseData] - 昨年データ
    * @param {'date'|'weekday'} [comparisonMode='date']
+   * @param {Function} [onClickCallback] - グラフ領域クリック時のコールバック
    * @returns {object|null} Chartインスタンス
    */
-  function renderKanbanChart(canvasElement, currentData, baseData, comparisonMode) {
+  function renderKanbanChart(canvasElement, currentData, baseData, comparisonMode, onClickCallback) {
     if (!canvasElement || !(canvasElement instanceof HTMLCanvasElement)) {
       return null;
     }
@@ -1024,6 +1025,11 @@
         interaction: {
           mode: 'index',
           intersect: false
+        },
+        onClick: function() {
+          if (typeof onClickCallback === 'function') {
+            onClickCallback();
+          }
         },
         plugins: {
           legend: {
