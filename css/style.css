@@ -858,9 +858,18 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 16px;
   border-left: 3px solid var(--accent-blue);
   padding-left: 12px;
+}
+
+.table-title-group {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .table-title {
@@ -869,6 +878,73 @@ body {
   color: var(--title-color);
   letter-spacing: 0.5px;
   transition: color 0.25s ease;
+}
+
+/* テーブル表示切り替えタブ (日別データ一覧 / 曜日別分析) */
+.table-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  gap: 3px;
+  user-select: none;
+}
+
+.btn-table-view {
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: var(--font-base);
+  white-space: nowrap;
+}
+
+.btn-table-view:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.btn-table-view.active {
+  background: var(--primary);
+  color: #070d19;
+  font-weight: 700;
+  box-shadow: 0 0 10px rgba(212, 175, 55, 0.25);
+}
+
+:root[data-theme="light"] .table-view-toggle {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: #cbd5e1;
+}
+
+:root[data-theme="light"] .btn-table-view {
+  color: #64748b;
+}
+
+:root[data-theme="light"] .btn-table-view:hover {
+  color: #0f172a;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+:root[data-theme="light"] .btn-table-view.active {
+  background: var(--primary);
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(180, 83, 9, 0.25);
+}
+
+.weekday-days-count {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-left: 6px;
+  font-family: var(--font-num);
 }
 
 .table-responsive {

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <!-- Content Security Policy: 外部スクリプトを遮断し、フォントのみ許可した堅牢設計 -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; base-uri 'none'; form-action 'none';">
   <meta name="referrer" content="no-referrer">
   <title>売上推移</title>
   <meta name="description" content="販売管理表Excelデータから日別の売上・客数・客単価を抽出し、3軸グラフおよび詳細テーブルを自動生成するラグジュアリー・ダークテーマWebツール">
@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
   
-  <link rel="stylesheet" href="css/style.css?v=20261103_fix2">
+  <link rel="stylesheet" href="css/style.css?v=20261108_weekday">
 </head>
 <body>
 
@@ -200,13 +200,23 @@
     <!-- データ詳細テーブル (初期非表示) -->
     <section id="table-container" class="table-card hidden" aria-label="日別データ一覧表">
       <div class="table-header-bar">
-        <div id="table-main-title" class="table-title">日別データ一覧</div>
+        <div class="table-title-group">
+          <div id="table-main-title" class="table-title">日別データ一覧</div>
+          <div class="table-view-toggle" id="table-view-toggle" role="tablist" aria-label="データ一覧・曜日別分析の切り替え">
+            <button type="button" id="btn-table-tab-daily" class="btn-table-view active" role="tab" aria-selected="true" title="日別のデータ一覧を表示します">
+              日別データ一覧
+            </button>
+            <button type="button" id="btn-table-tab-weekday" class="btn-table-view" role="tab" aria-selected="false" title="各曜日ごとの累計(比較日比％は平均)を表示します">
+              曜日別分析
+            </button>
+          </div>
+        </div>
       </div>
       <div class="table-responsive">
         <table class="data-table">
           <thead>
             <tr id="table-header-row">
-              <th class="text-center">日付</th>
+              <th id="th-col-first" class="text-center">日付</th>
               <th class="text-right">今期売上 (円)</th>
               <th class="text-right">昨年売上 (円)</th>
               <th class="text-right">売上前年比</th>
@@ -302,10 +312,10 @@
   </dialog>
 
   <!-- スクリプト読み込み (完全ローカル完結・厳格な実行順序) -->
-  <script src="vendor/xlsx.full.min.js?v=20261103_fix2"></script>
-  <script src="vendor/chart.umd.min.js?v=20261103_fix2"></script>
-  <script src="js/parser.js?v=20261103_fix2"></script>
-  <script src="js/chart.js?v=20261103_fix2"></script>
-  <script src="js/app.js?v=20261103_fix2"></script>
+  <script src="vendor/xlsx.full.min.js?v=20261108_weekday2"></script>
+  <script src="vendor/chart.umd.min.js?v=20261108_weekday2"></script>
+  <script src="js/parser.js?v=20261108_weekday2"></script>
+  <script src="js/chart.js?v=20261108_weekday2"></script>
+  <script src="js/app.js?v=20261108_weekday2"></script>
 </body>
 </html>

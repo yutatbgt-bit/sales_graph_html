@@ -9,6 +9,14 @@
 (function(global) {
   'use strict';
 
+  // Clickjacking 対策: 外部サイトの iframe 内での埋め込み実行を遮断
+  if (global.top !== global.self) {
+    if (document.body) {
+      document.body.replaceChildren();
+    }
+    return;
+  }
+
   // 許容最大ファイルサイズ (20MB)
   
   // ==========================================================================
@@ -272,6 +280,7 @@
   let currentTheme = 'dark';
   let comparisonMode = 'date';  // 'date' (同日対比) | 'weekday' (同曜日対比)
   let currentViewMode = 'single'; // 'single' (個別店舗) | 'kanban' (全店同時比較)
+  let currentTableTab = 'daily'; // 'daily' (日別データ一覧) | 'weekday' (曜日別分析)
   let baseDataSet = null;       // 基準データ (昨年売上)
   let compareDataSet = null;    // 比較日データ (今期売上)
   let baseAllStores = null;     // 全店舗基準データ解析結果
@@ -553,6 +562,20 @@
           tableContainer.classList.add('hidden');
           btnToggleTable.textContent = 'データ一覧を表示 ▼';
         }
+      });
+    }
+
+    // テーブル内のタブ切り替え (日別データ一覧 / 曜日別分析)
+    const btnTableTabDaily = document.getElementById('btn-table-tab-daily');
+    const btnTableTabWeekday = document.getElementById('btn-table-tab-weekday');
+    if (btnTableTabDaily) {
+      btnTableTabDaily.addEventListener('click', function() {
+        setTableTab('daily');
+      });
+    }
+    if (btnTableTabWeekday) {
+      btnTableTabWeekday.addEventListener('click', function() {
+        setTableTab('weekday');
       });
     }
 
@@ -1109,7 +1132,11 @@
 
     const tableTitleEl = document.getElementById('table-main-title');
     if (tableTitleEl) {
-      tableTitleEl.textContent = '日別データ一覧';
+      tableTitleEl.textContent = currentTableTab === 'weekday' ? '曜日別分析' : '日別データ一覧';
+    }
+    const thFirst = document.getElementById('th-col-first');
+    if (thFirst) {
+      thFirst.textContent = currentTableTab === 'weekday' ? '曜日' : '日付';
     }
 
     const tableContainer = document.getElementById('table-container');
@@ -2252,12 +2279,8 @@
     // メインタイトルの更新 (正確な期間範囲を表示)
     updateMainChartTitle(pairs, primaryData, secondaryData, hasCompare, hasBase, effectiveMode);
 
-    // テーブルタイトルの更新
-    const tableTitleEl = document.getElementById('table-main-title');
-    if (tableTitleEl) {
-      const tSuffix = (hasCompare && hasBase) ? (effectiveMode === 'weekday' ? ' (同曜日対比)' : ' (同日対比)') : '';
-      tableTitleEl.textContent = '日別データ一覧' + tSuffix;
-    }
+    // テーブルタイトル・第1列見出しの更新
+    updateTableTitleAndHeader(hasCompare, hasBase, effectiveMode);
 
     // 比較凡例の更新
     const compareLegendEl = document.getElementById('compare-legend');
@@ -2277,8 +2300,70 @@
     // グラフ領域の項目選択チップ（修正前と同じ全項目）の生成・更新
     updateMetricChips();
 
-    // テーブルの更新
-    renderDataTable(pairs, effectiveMode);
+    // テーブルの更新 (選択中のタブに応じて日別一覧または曜日別分析を描画)
+    if (currentTableTab === 'weekday') {
+      renderWeekdayTable(pairs, effectiveMode);
+    } else {
+      renderDataTable(pairs, effectiveMode);
+    }
+  }
+
+  /**
+   * テーブルのタブ切り替え (日別データ一覧 / 曜日別分析)
+   * @param {'daily'|'weekday'} tab
+   */
+  function setTableTab(tab) {
+    const nextTab = tab === 'weekday' ? 'weekday' : 'daily';
+    if (currentTableTab === nextTab) return;
+    currentTableTab = nextTab;
+
+    const btnDaily = document.getElementById('btn-table-tab-daily');
+    const btnWeekday = document.getElementById('btn-table-tab-weekday');
+    if (btnDaily) {
+      const isDaily = currentTableTab === 'daily';
+      btnDaily.classList.toggle('active', isDaily);
+      btnDaily.setAttribute('aria-selected', isDaily ? 'true' : 'false');
+    }
+    if (btnWeekday) {
+      const isWeekday = currentTableTab === 'weekday';
+      btnWeekday.classList.toggle('active', isWeekday);
+      btnWeekday.setAttribute('aria-selected', isWeekday ? 'true' : 'false');
+    }
+
+    const hasCompare = !!(compareDataSet && compareDataSet.length > 0);
+    const hasBase = !!(baseDataSet && baseDataSet.length > 0);
+    updateTableTitleAndHeader(hasCompare, hasBase, comparisonMode);
+
+    if (!hasCompare && !hasBase) return;
+
+    ensureWeekdayData(baseDataSet, baseFileName);
+    ensureWeekdayData(compareDataSet, compareFileName);
+
+    const primaryData = hasCompare ? compareDataSet : baseDataSet;
+    const secondaryData = hasCompare ? baseDataSet : null;
+    const pairs = global.SalesChart.buildComparisonPairs(primaryData, secondaryData, comparisonMode);
+
+    if (currentTableTab === 'weekday') {
+      renderWeekdayTable(pairs, comparisonMode);
+    } else {
+      renderDataTable(pairs, comparisonMode);
+    }
+  }
+
+  /**
+   * テーブルタイトルと第1カラム見出しの同期更新
+   */
+  function updateTableTitleAndHeader(hasCompare, hasBase, effectiveMode) {
+    const tableTitleEl = document.getElementById('table-main-title');
+    if (tableTitleEl) {
+      const tSuffix = (hasCompare && hasBase) ? (effectiveMode === 'weekday' ? ' (同曜日対比)' : ' (同日対比)') : '';
+      const baseTitle = currentTableTab === 'weekday' ? '曜日別分析' : '日別データ一覧';
+      tableTitleEl.textContent = baseTitle + tSuffix;
+    }
+    const thFirst = document.getElementById('th-col-first');
+    if (thFirst) {
+      thFirst.textContent = currentTableTab === 'weekday' ? '曜日' : '日付';
+    }
   }
 
   /**
@@ -2770,6 +2855,483 @@
         const priceRatioVal = ((curPrice / basePrice) * 100).toFixed(1);
         tdPriceRatio.textContent = priceRatioVal + '%';
         tdPriceRatio.className = 'text-right ' + (curPrice >= basePrice ? 'text-diff-up' : 'text-diff-down');
+      } else {
+        tdPriceRatio.textContent = '-';
+        tdPriceRatio.className = 'text-right text-diff-neutral';
+      }
+      tr.appendChild(tdPriceRatio);
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  /**
+   * 曜日別分析テーブルの描画 (各曜日ごとの累計、比較日比％は平均)
+   * 安全なDOM API (createElement / textContent) のみを使用
+   * @param {Array<{ day: number, curItem: object|null, baseItem: object|null, curLabel: string, baseLabel: string }>} pairs
+   * @param {'date'|'weekday'} mode
+   */
+  function renderWeekdayTable(pairs, mode) {
+    const tbody = document.getElementById('table-body');
+    if (!tbody) return;
+
+    while (tbody.firstChild) {
+      tbody.removeChild(tbody.firstChild);
+    }
+
+    if (!Array.isArray(pairs) || pairs.length === 0) return;
+
+    const WEEKDAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'];
+    const DOW_MAP = { '日': 0, '月': 1, '火': 2, '水': 3, '木': 4, '金': 5, '土': 6 };
+
+    function resolvePairDow(pair) {
+      if (pair.curItem && typeof pair.curItem.dayOfWeek === 'number' && pair.curItem.dayOfWeek >= 0 && pair.curItem.dayOfWeek <= 6) {
+        return pair.curItem.dayOfWeek;
+      }
+      if (pair.curLabel && typeof pair.curLabel === 'string') {
+        const m = pair.curLabel.match(/\(([日月火水木金土])\)/);
+        if (m && DOW_MAP[m[1]] !== undefined) {
+          return DOW_MAP[m[1]];
+        }
+      }
+      if (pair.baseItem && typeof pair.baseItem.dayOfWeek === 'number' && pair.baseItem.dayOfWeek >= 0 && pair.baseItem.dayOfWeek <= 6) {
+        return pair.baseItem.dayOfWeek;
+      }
+      return null;
+    }
+
+    const buckets = [];
+    for (let w = 0; w < 7; w++) {
+      buckets.push({
+        dow: w,
+        weekdayName: WEEKDAY_NAMES[w],
+        activeDays: 0,
+        sumCurSales: 0,
+        sumBaseSales: 0,
+        salesRatioSum: 0,
+        salesRatioCount: 0,
+        sumCurCount: 0,
+        sumBaseCount: 0,
+        sumCountDiff: 0,
+        hasCountDiff: false,
+        countRatioSum: 0,
+        countRatioCount: 0,
+        sumCurPrice: 0,
+        curPriceDays: 0,
+        sumBasePrice: 0,
+        basePriceDays: 0,
+        sumPriceDiff: 0,
+        hasPriceDiff: false,
+        priceRatioSum: 0,
+        priceRatioCount: 0
+      });
+    }
+
+    let totalActiveDays = 0;
+    let totalCurSales = 0, totalBaseSales = 0;
+    let totalSalesRatioSum = 0, totalSalesRatioCount = 0;
+    let totalCurCount = 0, totalBaseCount = 0;
+    let totalCountDiff = 0, totalHasCountDiff = false;
+    let totalCountRatioSum = 0, totalCountRatioCount = 0;
+    let totalCurPrice = 0, totalCurPriceDays = 0;
+    let totalBasePrice = 0, totalBasePriceDays = 0;
+    let totalPriceDiff = 0, totalHasPriceDiff = false;
+    let totalPriceRatioSum = 0, totalPriceRatioCount = 0;
+
+    pairs.forEach(function(pair) {
+      const dow = resolvePairDow(pair);
+      if (dow === null || dow < 0 || dow > 6) return;
+      const b = buckets[dow];
+
+      const curItem = pair.curItem;
+      const baseItem = pair.baseItem;
+      const curSales = curItem ? (curItem['売上'] || 0) : 0;
+      const baseSales = baseItem ? (baseItem['売上'] || 0) : 0;
+      const curCount = curItem ? (curItem['客数'] || 0) : 0;
+      const baseCount = baseItem ? (baseItem['客数'] || 0) : 0;
+      const curPrice = curItem ? (curItem['客単価'] || 0) : 0;
+      const basePrice = baseItem ? (baseItem['客単価'] || 0) : 0;
+
+      // 今期実績が存在する日（過日）のみを累計・平均対象とする
+      if (curSales > 0 || curCount > 0) {
+        b.activeDays += 1;
+        totalActiveDays += 1;
+
+        b.sumCurSales += curSales;
+        b.sumBaseSales += baseSales;
+        totalCurSales += curSales;
+        totalBaseSales += baseSales;
+
+        if (curSales > 0 && baseSales > 0) {
+          const sRatio = (curSales / baseSales) * 100;
+          b.salesRatioSum += sRatio;
+          b.salesRatioCount += 1;
+          totalSalesRatioSum += sRatio;
+          totalSalesRatioCount += 1;
+        }
+
+        b.sumCurCount += curCount;
+        b.sumBaseCount += baseCount;
+        totalCurCount += curCount;
+        totalBaseCount += baseCount;
+
+        if (curCount > 0 && baseCount > 0) {
+          const cDiff = curCount - baseCount;
+          const cRatio = (curCount / baseCount) * 100;
+          b.sumCountDiff += cDiff;
+          b.hasCountDiff = true;
+          b.countRatioSum += cRatio;
+          b.countRatioCount += 1;
+
+          totalCountDiff += cDiff;
+          totalHasCountDiff = true;
+          totalCountRatioSum += cRatio;
+          totalCountRatioCount += 1;
+        }
+
+        if (curPrice > 0) {
+          b.sumCurPrice += curPrice;
+          b.curPriceDays += 1;
+          totalCurPrice += curPrice;
+          totalCurPriceDays += 1;
+        }
+        if (basePrice > 0) {
+          b.sumBasePrice += basePrice;
+          b.basePriceDays += 1;
+          totalBasePrice += basePrice;
+          totalBasePriceDays += 1;
+        }
+
+        if (curPrice > 0 && basePrice > 0) {
+          const pDiff = curPrice - basePrice;
+          const pRatio = (curPrice / basePrice) * 100;
+          b.sumPriceDiff += pDiff;
+          b.hasPriceDiff = true;
+          b.priceRatioSum += pRatio;
+          b.priceRatioCount += 1;
+
+          totalPriceDiff += pDiff;
+          totalHasPriceDiff = true;
+          totalPriceRatioSum += pRatio;
+          totalPriceRatioCount += 1;
+        }
+      }
+    });
+
+    // 1. 全体合計行 (sticky固定)
+    const trTotal = document.createElement('tr');
+    trTotal.style.backgroundColor = 'var(--table-hover)';
+    trTotal.style.borderBottom = '2px solid var(--card-border)';
+
+    const tdTotalLabel = document.createElement('td');
+    tdTotalLabel.className = 'text-center font-bold';
+    tdTotalLabel.style.fontWeight = 'bold';
+    tdTotalLabel.textContent = '合計';
+    if (totalActiveDays > 0) {
+      const daysSpan = document.createElement('span');
+      daysSpan.className = 'weekday-days-count';
+      daysSpan.textContent = '(' + totalActiveDays + '日)';
+      tdTotalLabel.appendChild(daysSpan);
+    }
+    trTotal.appendChild(tdTotalLabel);
+
+    const tdTotalCurSales = document.createElement('td');
+    tdTotalCurSales.className = 'text-right font-bold color-sales';
+    tdTotalCurSales.style.fontWeight = 'bold';
+    tdTotalCurSales.textContent = totalCurSales > 0 ? '¥' + totalCurSales.toLocaleString() : '-';
+    trTotal.appendChild(tdTotalCurSales);
+
+    const tdTotalBaseSales = document.createElement('td');
+    tdTotalBaseSales.className = 'text-right font-bold text-muted-val';
+    tdTotalBaseSales.style.fontWeight = 'bold';
+    tdTotalBaseSales.textContent = totalBaseSales > 0 ? '¥' + totalBaseSales.toLocaleString() : '-';
+    trTotal.appendChild(tdTotalBaseSales);
+
+    const tdTotalSalesRatio = document.createElement('td');
+    if (totalSalesRatioCount > 0) {
+      const avgSalesRatio = totalSalesRatioSum / totalSalesRatioCount;
+      tdTotalSalesRatio.textContent = avgSalesRatio.toFixed(1) + '%';
+      tdTotalSalesRatio.className = 'text-right font-bold ' + (avgSalesRatio >= 100 ? 'text-diff-up' : 'text-diff-down');
+      if (totalCurSales > 0 && totalBaseSales > 0) {
+        const cumRatio = ((totalCurSales / totalBaseSales) * 100).toFixed(1);
+        tdTotalSalesRatio.title = '比較日比％平均: ' + avgSalesRatio.toFixed(1) + '% / 累計比: ' + cumRatio + '% (' + totalSalesRatioCount + '日平均)';
+      }
+    } else {
+      tdTotalSalesRatio.textContent = '-';
+      tdTotalSalesRatio.className = 'text-right font-bold text-diff-neutral';
+    }
+    tdTotalSalesRatio.style.fontWeight = 'bold';
+    trTotal.appendChild(tdTotalSalesRatio);
+
+    const tdTotalCurCount = document.createElement('td');
+    tdTotalCurCount.className = 'text-right font-bold color-count';
+    tdTotalCurCount.style.fontWeight = 'bold';
+    tdTotalCurCount.textContent = totalCurCount > 0 ? totalCurCount.toLocaleString() + ' 人' : '-';
+    trTotal.appendChild(tdTotalCurCount);
+
+    const tdTotalBaseCount = document.createElement('td');
+    tdTotalBaseCount.className = 'text-right font-bold text-muted-val';
+    tdTotalBaseCount.style.fontWeight = 'bold';
+    tdTotalBaseCount.textContent = totalBaseCount > 0 ? totalBaseCount.toLocaleString() + ' 人' : '-';
+    trTotal.appendChild(tdTotalBaseCount);
+
+    const tdTotalCountDiff = document.createElement('td');
+    if (totalHasCountDiff) {
+      tdTotalCountDiff.textContent = (totalCountDiff > 0 ? '+' : '') + totalCountDiff.toLocaleString() + ' 人';
+      tdTotalCountDiff.className = 'text-right font-bold ' + (totalCountDiff >= 0 ? 'text-diff-up' : 'text-diff-down');
+    } else {
+      tdTotalCountDiff.textContent = '-';
+      tdTotalCountDiff.className = 'text-right font-bold text-diff-neutral';
+    }
+    tdTotalCountDiff.style.fontWeight = 'bold';
+    trTotal.appendChild(tdTotalCountDiff);
+
+    const tdTotalCountRatio = document.createElement('td');
+    if (totalCountRatioCount > 0) {
+      const avgCountRatio = totalCountRatioSum / totalCountRatioCount;
+      tdTotalCountRatio.textContent = avgCountRatio.toFixed(1) + '%';
+      tdTotalCountRatio.className = 'text-right font-bold ' + (avgCountRatio >= 100 ? 'text-diff-up' : 'text-diff-down');
+      if (totalCurCount > 0 && totalBaseCount > 0) {
+        const cumRatio = ((totalCurCount / totalBaseCount) * 100).toFixed(1);
+        tdTotalCountRatio.title = '比較日比％平均: ' + avgCountRatio.toFixed(1) + '% / 累計比: ' + cumRatio + '% (' + totalCountRatioCount + '日平均)';
+      }
+    } else {
+      tdTotalCountRatio.textContent = '-';
+      tdTotalCountRatio.className = 'text-right font-bold text-diff-neutral';
+    }
+    tdTotalCountRatio.style.fontWeight = 'bold';
+    trTotal.appendChild(tdTotalCountRatio);
+
+    const avgTotalCurPrice = totalCurPriceDays > 0
+      ? Math.round(totalCurPrice / totalCurPriceDays)
+      : (totalCurCount > 0 ? Math.round(totalCurSales / totalCurCount) : 0);
+    const tdTotalCurPrice = document.createElement('td');
+    tdTotalCurPrice.className = 'text-right font-bold color-price';
+    tdTotalCurPrice.style.fontWeight = 'bold';
+    tdTotalCurPrice.textContent = avgTotalCurPrice > 0 ? '¥' + avgTotalCurPrice.toLocaleString() : '-';
+    if (avgTotalCurPrice > 0) {
+      tdTotalCurPrice.title = '平均単価: ¥' + avgTotalCurPrice.toLocaleString() + ' (' + totalCurPriceDays + '日平均)';
+    }
+    trTotal.appendChild(tdTotalCurPrice);
+
+    const avgTotalBasePrice = totalBasePriceDays > 0
+      ? Math.round(totalBasePrice / totalBasePriceDays)
+      : (totalBaseCount > 0 ? Math.round(totalBaseSales / totalBaseCount) : 0);
+    const tdTotalBasePrice = document.createElement('td');
+    tdTotalBasePrice.className = 'text-right font-bold text-muted-val';
+    tdTotalBasePrice.style.fontWeight = 'bold';
+    tdTotalBasePrice.textContent = avgTotalBasePrice > 0 ? '¥' + avgTotalBasePrice.toLocaleString() : '-';
+    if (avgTotalBasePrice > 0) {
+      tdTotalBasePrice.title = '平均単価: ¥' + avgTotalBasePrice.toLocaleString() + ' (' + totalBasePriceDays + '日平均)';
+    }
+    trTotal.appendChild(tdTotalBasePrice);
+
+    const tdTotalPriceDiff = document.createElement('td');
+    if (totalHasPriceDiff) {
+      const sign = totalPriceDiff > 0 ? '+¥' : (totalPriceDiff < 0 ? '-¥' : '¥');
+      tdTotalPriceDiff.textContent = sign + Math.abs(totalPriceDiff).toLocaleString();
+      tdTotalPriceDiff.className = 'text-right font-bold ' + (totalPriceDiff >= 0 ? 'text-diff-up' : 'text-diff-down');
+    } else {
+      tdTotalPriceDiff.textContent = '-';
+      tdTotalPriceDiff.className = 'text-right font-bold text-diff-neutral';
+    }
+    tdTotalPriceDiff.style.fontWeight = 'bold';
+    trTotal.appendChild(tdTotalPriceDiff);
+
+    const tdTotalPriceRatio = document.createElement('td');
+    if (totalPriceRatioCount > 0) {
+      const avgPriceRatio = totalPriceRatioSum / totalPriceRatioCount;
+      tdTotalPriceRatio.textContent = avgPriceRatio.toFixed(1) + '%';
+      tdTotalPriceRatio.className = 'text-right font-bold ' + (avgPriceRatio >= 100 ? 'text-diff-up' : 'text-diff-down');
+      if (totalCurPrice > 0 && totalBasePrice > 0) {
+        const cumRatio = ((totalCurPrice / totalBasePrice) * 100).toFixed(1);
+        tdTotalPriceRatio.title = '比較日比％平均: ' + avgPriceRatio.toFixed(1) + '% / 累計比: ' + cumRatio + '% (' + totalPriceRatioCount + '日平均)';
+      }
+    } else {
+      tdTotalPriceRatio.textContent = '-';
+      tdTotalPriceRatio.className = 'text-right font-bold text-diff-neutral';
+    }
+    tdTotalPriceRatio.style.fontWeight = 'bold';
+    trTotal.appendChild(tdTotalPriceRatio);
+
+    tbody.appendChild(trTotal);
+
+    // ヘッダー行の高さを明示的に固定し、透過ボーダーによる文字透けを完全に防ぐ
+    const theadRow = document.getElementById('table-header-row');
+    if (theadRow) {
+      Array.from(theadRow.children).forEach(function(th) {
+        th.style.height = '46px';
+        th.style.boxSizing = 'border-box';
+        th.style.borderBottom = 'none';
+        th.style.boxShadow = 'inset 0 -2px 0 0 var(--card-border)';
+      });
+    }
+
+    // 合計行をスクロール時にカラム行の直下に完全に固定する設定
+    Array.from(trTotal.children).forEach(function(td) {
+      td.style.position = 'sticky';
+      td.style.top = '46px';
+      td.style.zIndex = '9';
+      td.style.backgroundColor = 'var(--table-th-bg)';
+      td.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15)';
+      td.style.backgroundClip = 'padding-box';
+    });
+
+    // 2. 各曜日の行を描画 (日〜土)
+    buckets.forEach(function(b) {
+      const isInactive = b.activeDays === 0;
+      const tr = document.createElement('tr');
+      if (isInactive) {
+        tr.classList.add('row-inactive');
+      }
+
+      // 曜日 (曜日バッジ + 集計日数)
+      const tdDow = document.createElement('td');
+      tdDow.className = 'text-center font-medium';
+
+      const dowBadge = document.createElement('span');
+      dowBadge.textContent = b.weekdayName + '曜日';
+      dowBadge.className = 'weekday-badge';
+      if (b.dow === 6) {
+        dowBadge.classList.add('weekday-sat');
+      } else if (b.dow === 0) {
+        dowBadge.classList.add('weekday-sun');
+      }
+      tdDow.appendChild(dowBadge);
+
+      if (b.activeDays > 0) {
+        const daysSpan = document.createElement('span');
+        daysSpan.className = 'weekday-days-count';
+        daysSpan.textContent = '(' + b.activeDays + '日)';
+        tdDow.appendChild(daysSpan);
+      }
+      tr.appendChild(tdDow);
+
+      // 今期売上 (累計)
+      const tdCurSales = document.createElement('td');
+      tdCurSales.textContent = b.sumCurSales > 0 ? '¥' + b.sumCurSales.toLocaleString() : '-';
+      tdCurSales.className = 'text-right font-semibold color-sales';
+      if (b.sumCurSales > 0 && b.activeDays > 0) {
+        tdCurSales.title = b.weekdayName + '曜日 今期売上累計 (' + b.activeDays + '日分 / 1日平均: ¥' + Math.round(b.sumCurSales / b.activeDays).toLocaleString() + ')';
+      }
+      tr.appendChild(tdCurSales);
+
+      // 昨年売上 (累計)
+      const tdBaseSales = document.createElement('td');
+      tdBaseSales.textContent = b.sumBaseSales > 0 ? '¥' + b.sumBaseSales.toLocaleString() : '-';
+      tdBaseSales.className = 'text-right text-muted-val';
+      if (b.sumBaseSales > 0 && b.activeDays > 0) {
+        tdBaseSales.title = b.weekdayName + '曜日 昨年売上累計 (' + b.activeDays + '日分 / 1日平均: ¥' + Math.round(b.sumBaseSales / b.activeDays).toLocaleString() + ')';
+      }
+      tr.appendChild(tdBaseSales);
+
+      // 売上前年比 (比較日比％は平均)
+      const tdSalesRatio = document.createElement('td');
+      if (b.salesRatioCount > 0) {
+        const avgRatio = b.salesRatioSum / b.salesRatioCount;
+        tdSalesRatio.textContent = avgRatio.toFixed(1) + '%';
+        tdSalesRatio.className = 'text-right ' + (avgRatio >= 100 ? 'text-diff-up' : 'text-diff-down');
+        if (b.sumCurSales > 0 && b.sumBaseSales > 0) {
+          const cumRatio = ((b.sumCurSales / b.sumBaseSales) * 100).toFixed(1);
+          tdSalesRatio.title = '比較日比％平均: ' + avgRatio.toFixed(1) + '% / 累計比: ' + cumRatio + '% (' + b.salesRatioCount + '日分)';
+        }
+      } else {
+        tdSalesRatio.textContent = '-';
+        tdSalesRatio.className = 'text-right text-diff-neutral';
+      }
+      tr.appendChild(tdSalesRatio);
+
+      // 今期客数 (累計)
+      const tdCurCount = document.createElement('td');
+      tdCurCount.textContent = b.sumCurCount > 0 ? b.sumCurCount.toLocaleString() + ' 人' : '-';
+      tdCurCount.className = 'text-right color-count';
+      if (b.sumCurCount > 0 && b.activeDays > 0) {
+        tdCurCount.title = b.weekdayName + '曜日 今期客数累計 (' + b.activeDays + '日分 / 1日平均: ' + Math.round(b.sumCurCount / b.activeDays).toLocaleString() + ' 人)';
+      }
+      tr.appendChild(tdCurCount);
+
+      // 昨年客数 (累計)
+      const tdBaseCount = document.createElement('td');
+      tdBaseCount.textContent = b.sumBaseCount > 0 ? b.sumBaseCount.toLocaleString() + ' 人' : '-';
+      tdBaseCount.className = 'text-right text-muted-val';
+      if (b.sumBaseCount > 0 && b.activeDays > 0) {
+        tdBaseCount.title = b.weekdayName + '曜日 昨年客数累計 (' + b.activeDays + '日分 / 1日平均: ' + Math.round(b.sumBaseCount / b.activeDays).toLocaleString() + ' 人)';
+      }
+      tr.appendChild(tdBaseCount);
+
+      // 客数差分 (累計)
+      const tdCountDiff = document.createElement('td');
+      if (b.hasCountDiff) {
+        tdCountDiff.textContent = (b.sumCountDiff > 0 ? '+' : '') + b.sumCountDiff.toLocaleString() + ' 人';
+        tdCountDiff.className = 'text-right ' + (b.sumCountDiff >= 0 ? 'text-diff-up' : 'text-diff-down');
+      } else {
+        tdCountDiff.textContent = '-';
+        tdCountDiff.className = 'text-right text-diff-neutral';
+      }
+      tr.appendChild(tdCountDiff);
+
+      // 客数前年比 (比較日比％は平均)
+      const tdCountRatio = document.createElement('td');
+      if (b.countRatioCount > 0) {
+        const avgCountRatio = b.countRatioSum / b.countRatioCount;
+        tdCountRatio.textContent = avgCountRatio.toFixed(1) + '%';
+        tdCountRatio.className = 'text-right ' + (avgCountRatio >= 100 ? 'text-diff-up' : 'text-diff-down');
+        if (b.sumCurCount > 0 && b.sumBaseCount > 0) {
+          const cumRatio = ((b.sumCurCount / b.sumBaseCount) * 100).toFixed(1);
+          tdCountRatio.title = '比較日比％平均: ' + avgCountRatio.toFixed(1) + '% / 累計比: ' + cumRatio + '% (' + b.countRatioCount + '日分)';
+        }
+      } else {
+        tdCountRatio.textContent = '-';
+        tdCountRatio.className = 'text-right text-diff-neutral';
+      }
+      tr.appendChild(tdCountRatio);
+
+      // 今期単価 (平均値)
+      const avgCurPrice = b.curPriceDays > 0
+        ? Math.round(b.sumCurPrice / b.curPriceDays)
+        : (b.sumCurCount > 0 ? Math.round(b.sumCurSales / b.sumCurCount) : 0);
+      const tdCurPrice = document.createElement('td');
+      tdCurPrice.textContent = avgCurPrice > 0 ? '¥' + avgCurPrice.toLocaleString() : '-';
+      tdCurPrice.className = 'text-right color-price';
+      if (avgCurPrice > 0) {
+        tdCurPrice.title = b.weekdayName + '曜日 今期平均単価: ¥' + avgCurPrice.toLocaleString() + ' (' + b.curPriceDays + '日平均)';
+      }
+      tr.appendChild(tdCurPrice);
+
+      // 昨年単価 (平均値)
+      const avgBasePrice = b.basePriceDays > 0
+        ? Math.round(b.sumBasePrice / b.basePriceDays)
+        : (b.sumBaseCount > 0 ? Math.round(b.sumBaseSales / b.sumBaseCount) : 0);
+      const tdBasePrice = document.createElement('td');
+      tdBasePrice.textContent = avgBasePrice > 0 ? '¥' + avgBasePrice.toLocaleString() : '-';
+      tdBasePrice.className = 'text-right text-muted-val';
+      if (avgBasePrice > 0) {
+        tdBasePrice.title = b.weekdayName + '曜日 昨年平均単価: ¥' + avgBasePrice.toLocaleString() + ' (' + b.basePriceDays + '日平均)';
+      }
+      tr.appendChild(tdBasePrice);
+
+      // 単価差分 (累計)
+      const tdPriceDiff = document.createElement('td');
+      if (b.hasPriceDiff) {
+        const sign = b.sumPriceDiff > 0 ? '+¥' : (b.sumPriceDiff < 0 ? '-¥' : '¥');
+        tdPriceDiff.textContent = sign + Math.abs(b.sumPriceDiff).toLocaleString();
+        tdPriceDiff.className = 'text-right ' + (b.sumPriceDiff >= 0 ? 'text-diff-up' : 'text-diff-down');
+      } else {
+        tdPriceDiff.textContent = '-';
+        tdPriceDiff.className = 'text-right text-diff-neutral';
+      }
+      tr.appendChild(tdPriceDiff);
+
+      // 客単価前年比 (比較日比％は平均)
+      const tdPriceRatio = document.createElement('td');
+      if (b.priceRatioCount > 0) {
+        const avgPriceRatio = b.priceRatioSum / b.priceRatioCount;
+        tdPriceRatio.textContent = avgPriceRatio.toFixed(1) + '%';
+        tdPriceRatio.className = 'text-right ' + (avgPriceRatio >= 100 ? 'text-diff-up' : 'text-diff-down');
+        if (b.sumCurPrice > 0 && b.sumBasePrice > 0) {
+          const cumRatio = ((b.sumCurPrice / b.sumBasePrice) * 100).toFixed(1);
+          tdPriceRatio.title = '比較日比％平均: ' + avgPriceRatio.toFixed(1) + '% / 累計比: ' + cumRatio + '% (' + b.priceRatioCount + '日分)';
+        }
       } else {
         tdPriceRatio.textContent = '-';
         tdPriceRatio.className = 'text-right text-diff-neutral';
