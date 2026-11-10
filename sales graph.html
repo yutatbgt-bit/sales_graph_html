@@ -1,22 +1,27 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <!-- Content Security Policy: 外部スクリプトを遮断し、フォントのみ許可した堅牢設計 -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; base-uri 'none'; form-action 'none';">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; base-uri 'none'; form-action 'none';">
   <meta name="referrer" content="no-referrer">
   <title>売上推移</title>
   <meta name="description" content="販売管理表Excelデータから日別の売上・客数・客単価を抽出し、3軸グラフおよび詳細テーブルを自動生成するラグジュアリー・ダークテーマWebツール">
-  
+
   <!-- Google Fonts: Inter & Outfit -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
-  
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+
   <link rel="stylesheet" href="css/style.css?v=20261108_weekday">
 </head>
+
 <body>
 
   <!-- ヘッダー (参照ファイルと同一レイアウト: タイトル + コンパクトなアップロード領域) -->
@@ -28,7 +33,8 @@
         </div>
         <div class="store-profile-bar" role="region" aria-label="店舗プロファイル切り替え">
           <label for="select-store-profile" class="store-profile-label">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
               <polyline points="9 22 9 12 15 12 15 22"></polyline>
             </svg>
@@ -37,9 +43,12 @@
           <select id="select-store-profile" class="store-profile-select" aria-label="分析対象店舗プロファイル選択">
             <option value="デフォルト">デフォルト</option>
           </select>
-          <button type="button" id="btn-add-store-profile" class="btn-profile-action" title="新規店舗プロファイルを追加" aria-label="新規店舗プロファイルを追加">＋</button>
-          <button type="button" id="btn-rename-store-profile" class="btn-profile-action" title="現在の店舗プロファイル名を変更" aria-label="現在の店舗プロファイル名を変更">✎</button>
-          <button type="button" id="btn-delete-store-profile" class="btn-profile-action btn-profile-delete" title="現在の店舗プロファイルを削除" aria-label="現在の店舗プロファイルを削除">✕</button>
+          <button type="button" id="btn-add-store-profile" class="btn-profile-action" title="新規店舗プロファイルを追加"
+            aria-label="新規店舗プロファイルを追加">＋</button>
+          <button type="button" id="btn-rename-store-profile" class="btn-profile-action" title="現在の店舗プロファイル名を変更"
+            aria-label="現在の店舗プロファイル名を変更">✎</button>
+          <button type="button" id="btn-delete-store-profile" class="btn-profile-action btn-profile-delete"
+            title="現在の店舗プロファイルを削除" aria-label="現在の店舗プロファイルを削除">✕</button>
         </div>
       </div>
 
@@ -47,7 +56,8 @@
       <div class="upload-section">
         <!-- 基準データ（昨年売上）アップロード -->
         <div class="upload-group">
-          <label for="file-input-base" class="file-drop-zone drop-zone-base" id="drop-zone-base" role="button" tabindex="0" aria-label="基準データ(昨年売上)をアップロード">
+          <label for="file-input-base" class="file-drop-zone drop-zone-base" id="drop-zone-base" role="button"
+            tabindex="0" aria-label="基準データ(昨年売上)をアップロード">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
               stroke-linecap="round" stroke-linejoin="round" class="icon-base">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -56,13 +66,16 @@
             </svg>
             <p>基準データアップロード</p>
           </label>
-          <input type="file" id="file-input-base" accept=".xlsx, .xls, .xlsm, .xlsb, .csv" style="display: none;" aria-label="基準データ(Excel/CSV)ファイル選択">
-          <button type="button" id="file-name-base" class="file-pill pill-base hidden" title="クリックして基準データを削除">基準: 未読込</button>
+          <input type="file" id="file-input-base" accept=".xlsx, .xls, .xlsm, .xlsb, .csv" style="display: none;"
+            aria-label="基準データ(Excel/CSV)ファイル選択">
+          <button type="button" id="file-name-base" class="file-pill pill-base hidden" title="クリックして基準データを削除">基準:
+            未読込</button>
         </div>
 
         <!-- 比較日データ（今期売上）アップロード -->
         <div class="upload-group">
-          <label for="file-input-compare" class="file-drop-zone drop-zone-compare" id="drop-zone-compare" role="button" tabindex="0" aria-label="比較日データ(今期売上)をアップロード">
+          <label for="file-input-compare" class="file-drop-zone drop-zone-compare" id="drop-zone-compare" role="button"
+            tabindex="0" aria-label="比較日データ(今期売上)をアップロード">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
               stroke-linecap="round" stroke-linejoin="round" class="icon-compare">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -71,8 +84,10 @@
             </svg>
             <p>比較日データアップロード</p>
           </label>
-          <input type="file" id="file-input-compare" accept=".xlsx, .xls, .xlsm, .xlsb, .csv" style="display: none;" aria-label="比較日データ(Excel/CSV)ファイル選択">
-          <button type="button" id="file-name-compare" class="file-pill pill-compare hidden" title="クリックして比較日データを削除">比較: 未読込</button>
+          <input type="file" id="file-input-compare" accept=".xlsx, .xls, .xlsm, .xlsb, .csv" style="display: none;"
+            aria-label="比較日データ(Excel/CSV)ファイル選択">
+          <button type="button" id="file-name-compare" class="file-pill pill-compare hidden" title="クリックして比較日データを削除">比較:
+            未読込</button>
         </div>
 
         <!-- 対比方式切り替え (同日対比 / 同曜日対比) -->
@@ -87,10 +102,12 @@
 
         <!-- 表示ビュー切り替え (個別店舗 / 全店同時比較カンバン) -->
         <div class="view-toggle-group" role="tablist" aria-label="表示ビュー切り替え">
-          <button type="button" id="btn-view-single" class="btn-view-tab active" role="tab" aria-selected="true" title="個別店舗の詳細グラフを表示します">
+          <button type="button" id="btn-view-single" class="btn-view-tab active" role="tab" aria-selected="true"
+            title="個別店舗の詳細グラフを表示します">
             個別店舗
           </button>
-          <button type="button" id="btn-view-kanban" class="btn-view-tab" role="tab" aria-selected="false" title="登録店舗を2列カンバンビューで同時比較します">
+          <button type="button" id="btn-view-kanban" class="btn-view-tab" role="tab" aria-selected="false"
+            title="登録店舗を2列カンバンビューで同時比較します">
             全店同時比較
           </button>
         </div>
@@ -102,29 +119,38 @@
           データ一覧を表示 ▼
         </button>
         <!-- 全店舗データ一括削除ボタン（アイコン表示のみ） -->
-        <button type="button" id="btn-reset-data" class="header-icon-btn btn-reset-data" title="全店舗の売上データを一括削除します" aria-label="全店舗の売上データを一括削除">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <button type="button" id="btn-reset-data" class="header-icon-btn btn-reset-data" title="全店舗の売上データを一括削除します"
+          aria-label="全店舗の売上データを一括削除">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <polyline points="3 6 5 6 21 6"></polyline>
             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
           </svg>
         </button>
 
         <!-- 全画面表示切り替えボタン（アイコン表示のみ） -->
-        <button type="button" id="btn-fullscreen" class="header-icon-btn btn-fullscreen-toggle" title="全画面表示に切り替えます" aria-label="全画面表示に切り替え" aria-pressed="false">
+        <button type="button" id="btn-fullscreen" class="header-icon-btn btn-fullscreen-toggle" title="全画面表示に切り替えます"
+          aria-label="全画面表示に切り替え" aria-pressed="false">
           <span class="fullscreen-icon-container">
-            <svg class="icon-maximize" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+            <svg class="icon-maximize" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3">
+              </path>
             </svg>
-            <svg class="icon-minimize" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path>
+            <svg class="icon-minimize" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3">
+              </path>
             </svg>
           </span>
         </button>
 
         <!-- テーマ切り替えボタン（ダーク/ライト・アイコン表示のみ） -->
-        <button type="button" id="btn-theme-toggle" class="header-icon-btn btn-theme-toggle" title="ライトモードに切り替えます" aria-label="ライトモードに切り替え" aria-pressed="false">
+        <button type="button" id="btn-theme-toggle" class="header-icon-btn btn-theme-toggle" title="ライトモードに切り替えます"
+          aria-label="ライトモードに切り替え" aria-pressed="false">
           <span class="theme-icon-container">
-            <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="12" cy="12" r="5"></circle>
               <line x1="12" y1="1" x2="12" y2="3"></line>
               <line x1="12" y1="21" x2="12" y2="23"></line>
@@ -135,7 +161,8 @@
               <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
               <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
             </svg>
-            <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
             </svg>
           </span>
@@ -184,8 +211,10 @@
         <div class="metric-chip-group" id="metric-chip-group" role="group" aria-label="グラフ表示項目の切り替え"></div>
       </div>
       <div id="compare-legend" class="compare-legend hidden" aria-live="polite">
-        <span class="legend-item"><span class="legend-swatch swatch-solid"></span><span id="legend-cur-label">今期</span></span>
-        <span class="legend-item"><span class="legend-swatch swatch-dashed"></span><span id="legend-base-label">昨年</span></span>
+        <span class="legend-item"><span class="legend-swatch swatch-solid"></span><span
+            id="legend-cur-label">今期</span></span>
+        <span class="legend-item"><span class="legend-swatch swatch-dashed"></span><span
+            id="legend-base-label">昨年</span></span>
       </div>
       <div class="chart-wrapper">
         <div id="chart-placeholder" class="chart-placeholder">
@@ -203,10 +232,12 @@
         <div class="table-title-group">
           <div id="table-main-title" class="table-title">日別データ一覧</div>
           <div class="table-view-toggle" id="table-view-toggle" role="tablist" aria-label="データ一覧・曜日別分析の切り替え">
-            <button type="button" id="btn-table-tab-daily" class="btn-table-view active" role="tab" aria-selected="true" title="日別のデータ一覧を表示します">
+            <button type="button" id="btn-table-tab-daily" class="btn-table-view active" role="tab" aria-selected="true"
+              title="日別のデータ一覧を表示します">
               日別データ一覧
             </button>
-            <button type="button" id="btn-table-tab-weekday" class="btn-table-view" role="tab" aria-selected="false" title="各曜日ごとの累計(比較日比％は平均)を表示します">
+            <button type="button" id="btn-table-tab-weekday" class="btn-table-view" role="tab" aria-selected="false"
+              title="各曜日ごとの累計(比較日比％は平均)を表示します">
               曜日別分析
             </button>
           </div>
@@ -222,12 +253,12 @@
               <th class="text-right">売上前年比</th>
               <th class="text-right">今期客数 (人)</th>
               <th class="text-right">昨年客数 (人)</th>
-                <th class="text-right">客数差分 (人)</th>
-                <th class="text-right">客数前年比</th>
+              <th class="text-right">客数差分 (人)</th>
+              <th class="text-right">客数前年比</th>
               <th class="text-right">今期単価 (円)</th>
               <th class="text-right">昨年単価 (円)</th>
-                <th class="text-right">単価差分 (円)</th>
-                <th class="text-right">客単価前年比</th>
+              <th class="text-right">単価差分 (円)</th>
+              <th class="text-right">客単価前年比</th>
             </tr>
           </thead>
           <tbody id="table-body">
@@ -241,12 +272,14 @@
     <section id="kanban-view-container" class="kanban-view-container hidden" aria-label="全店舗 2列カンバン比較ビュー">
       <div class="kanban-header-bar">
         <div class="kanban-title-wrap">
-          <h2 class="kanban-main-title">全店同時比較 (2列カンバンビュー)</h2>
+          <h2 class="kanban-main-title">全店同時比較</h2>
           <span id="kanban-store-count-badge" class="kanban-badge">全店舗 同時比較</span>
         </div>
         <div class="compare-legend kanban-legend" aria-live="polite">
-          <span class="legend-item"><span class="legend-swatch swatch-solid"></span><span>今期 (棒:売上 / 線:客数・単価)</span></span>
-          <span class="legend-item"><span class="legend-swatch swatch-dashed"></span><span>昨年 (棒:売上 / 点線:客数・単価)</span></span>
+          <span class="legend-item"><span class="legend-swatch swatch-solid"></span><span>今期 (棒:売上 /
+              線:客数・単価)</span></span>
+          <span class="legend-item"><span class="legend-swatch swatch-dashed"></span><span>昨年 (棒:売上 /
+              点線:客数・単価)</span></span>
         </div>
       </div>
       <div id="kanban-grid" class="kanban-grid">
@@ -265,7 +298,8 @@
       </div>
       <div class="profile-dialog-body">
         <label for="input-profile-name" class="profile-input-label">店舗名（最大30文字）</label>
-        <input type="text" id="input-profile-name" class="profile-input" maxlength="30" placeholder="例: 渋谷店、新宿店" autocomplete="off">
+        <input type="text" id="input-profile-name" class="profile-input" maxlength="30" placeholder="例: 渋谷店、新宿店"
+          autocomplete="off">
         <p id="profile-error-message" class="profile-error-message hidden" role="alert"></p>
       </div>
       <div class="profile-dialog-footer">
@@ -288,7 +322,8 @@
       </div>
       <div class="profile-dialog-footer">
         <button type="button" id="btn-cancel-delete-dialog" class="btn btn-secondary btn-sm">キャンセル</button>
-        <button type="button" id="btn-confirm-delete-dialog" class="btn btn-accent btn-delete-confirm btn-sm">削除する</button>
+        <button type="button" id="btn-confirm-delete-dialog"
+          class="btn btn-accent btn-delete-confirm btn-sm">削除する</button>
       </div>
     </div>
   </dialog>
@@ -302,11 +337,13 @@
       </div>
       <div class="profile-dialog-body">
         <p class="delete-dialog-message">全店舗に保存された売上実績データを一括削除しますか？</p>
-        <p class="delete-dialog-subtext">※全店舗の基準データおよび比較日データがすべて消去され、初期状態に戻ります。<br>※登録済みの店舗名一覧（プロファイル）はそのまま保持されます。<br>※この操作は取り消せません。</p>
+        <p class="delete-dialog-subtext">
+          ※全店舗の基準データおよび比較日データがすべて消去され、初期状態に戻ります。<br>※登録済みの店舗名一覧（プロファイル）はそのまま保持されます。<br>※この操作は取り消せません。</p>
       </div>
       <div class="profile-dialog-footer">
         <button type="button" id="btn-cancel-reset-dialog" class="btn btn-secondary btn-sm">キャンセル</button>
-        <button type="button" id="btn-confirm-reset-dialog" class="btn btn-accent btn-delete-confirm btn-sm">一括削除を実行</button>
+        <button type="button" id="btn-confirm-reset-dialog"
+          class="btn btn-accent btn-delete-confirm btn-sm">一括削除を実行</button>
       </div>
     </div>
   </dialog>
@@ -318,4 +355,5 @@
   <script src="js/chart.js?v=20261108_weekday2"></script>
   <script src="js/app.js?v=20261108_weekday2"></script>
 </body>
+
 </html>
