@@ -2435,11 +2435,11 @@
       periodLabel = '期間未特定';
     }
 
-    const rawStore = (dataSet && dataSet.storeName && String(dataSet.storeName).trim()) || currentProfile || '全店舗';
-    const storeLabel = isAllStoreLabel(rawStore) ? '全店舗' : rawStore;
+    const rawStore = (dataSet && dataSet.storeName && String(dataSet.storeName).replace(/[\u0000-\u001F\u007F]/g, '').trim()) || currentProfile || '全店舗';
+    const storeLabel = (isAllStoreLabel(rawStore) ? '全店舗' : rawStore).slice(0, 30);
 
     return {
-      periodLabel: periodLabel,
+      periodLabel: String(periodLabel || '期間未特定').replace(/[\u0000-\u001F\u007F]/g, '').slice(0, 50),
       storeLabel: storeLabel
     };
   }
