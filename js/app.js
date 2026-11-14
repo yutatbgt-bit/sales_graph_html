@@ -6,7 +6,7 @@
  * - XSS耐性、ファイル型およびサイズ制限、厳格なファイル名サニタイズ
  * - 基準データ（昨年）と比較日データ（今期）の期間自動判定・安全なスワップ
  */
-(function(global) {
+(function (global) {
   'use strict';
 
   // Clickjacking 対策: 外部サイトの iframe 内での埋め込み実行を遮断
@@ -18,14 +18,14 @@
   }
 
   // 許容最大ファイルサイズ (20MB)
-  
+
   // ==========================================================================
   // ハイブリッド・ストレージマネージャー (IndexedDB + localStorage フォールバック)
   // ==========================================================================
   // ハイブリッド・ストレージマネージャー (IndexedDB + localStorage フォールバック)
   // 店舗プロファイルごとのデータ完全分離対応
   // ==========================================================================
-  const AppStorage = (function() {
+  const AppStorage = (function () {
     const DB_NAME = 'SalesGraphAppDB';
     const DB_VERSION = 1;
     const STORE_NAME = 'graph_store';
@@ -34,32 +34,32 @@
     const PROFILE_PREFIX = 'app_state::';
 
     function openDB() {
-      return new Promise(function(resolve, reject) {
+      return new Promise(function (resolve, reject) {
         if (!window.indexedDB) {
           return reject(new Error('IndexedDB not supported'));
         }
         const req = indexedDB.open(DB_NAME, DB_VERSION);
-        req.onupgradeneeded = function(e) {
+        req.onupgradeneeded = function (e) {
           const db = e.target.result;
           if (!db.objectStoreNames.contains(STORE_NAME)) {
             db.createObjectStore(STORE_NAME);
           }
         };
-        req.onsuccess = function(e) { resolve(e.target.result); };
-        req.onerror = function(e) { reject(e.target.error); };
+        req.onsuccess = function (e) { resolve(e.target.result); };
+        req.onerror = function (e) { reject(e.target.error); };
       });
     }
 
     function get(key) {
-      return openDB().then(function(db) {
-        return new Promise(function(resolve, reject) {
+      return openDB().then(function (db) {
+        return new Promise(function (resolve, reject) {
           const tx = db.transaction(STORE_NAME, 'readonly');
           const store = tx.objectStore(STORE_NAME);
           const req = store.get(key);
-          req.onsuccess = function() { resolve(req.result); };
-          req.onerror = function() { reject(req.error); };
+          req.onsuccess = function () { resolve(req.result); };
+          req.onerror = function () { reject(req.error); };
         });
-      }).catch(function() {
+      }).catch(function () {
         try {
           const raw = localStorage.getItem('sg_' + key);
           return raw ? JSON.parse(raw) : null;
@@ -70,15 +70,15 @@
     }
 
     function set(key, val) {
-      return openDB().then(function(db) {
-        return new Promise(function(resolve, reject) {
+      return openDB().then(function (db) {
+        return new Promise(function (resolve, reject) {
           const tx = db.transaction(STORE_NAME, 'readwrite');
           const store = tx.objectStore(STORE_NAME);
           const req = store.put(val, key);
-          req.onsuccess = function() { resolve(); };
-          req.onerror = function() { reject(req.error); };
+          req.onsuccess = function () { resolve(); };
+          req.onerror = function () { reject(req.error); };
         });
-      }).catch(function() {
+      }).catch(function () {
         try {
           localStorage.setItem('sg_' + key, JSON.stringify(val));
         } catch (e) {
@@ -88,25 +88,25 @@
     }
 
     function remove(key) {
-      return openDB().then(function(db) {
-        return new Promise(function(resolve, reject) {
+      return openDB().then(function (db) {
+        return new Promise(function (resolve, reject) {
           const tx = db.transaction(STORE_NAME, 'readwrite');
           const store = tx.objectStore(STORE_NAME);
           const req = store.delete(key);
-          req.onsuccess = function() { resolve(); };
-          req.onerror = function() { reject(req.error); };
+          req.onsuccess = function () { resolve(); };
+          req.onerror = function () { reject(req.error); };
         });
-      }).catch(function() {
+      }).catch(function () {
         try {
           localStorage.removeItem('sg_' + key);
-        } catch (e) {}
+        } catch (e) { }
       });
     }
 
     function getProfiles() {
-      return get(PROFILES_KEY).then(function(list) {
+      return get(PROFILES_KEY).then(function (list) {
         if (Array.isArray(list) && list.length > 0) {
-          const cleaned = list.filter(function(p) {
+          const cleaned = list.filter(function (p) {
             if (!p || typeof p !== 'string') return false;
             const t = p.trim();
             if (t.length === 0) return false;
@@ -123,7 +123,7 @@
     }
 
     function saveProfiles(profiles) {
-      const sanitized = Array.isArray(profiles) ? profiles.filter(function(p) {
+      const sanitized = Array.isArray(profiles) ? profiles.filter(function (p) {
         if (!p || typeof p !== 'string') return false;
         const t = p.trim();
         if (t.length === 0) return false;
@@ -138,11 +138,11 @@
     function loadProfileState(profileName) {
       const name = profileName || DEFAULT_PROFILE_NAME;
       const key = PROFILE_PREFIX + name;
-      return get(key).then(function(data) {
+      return get(key).then(function (data) {
         if (data) return data;
         // 旧仕様 (app_state) からの移行互換
         if (name === DEFAULT_PROFILE_NAME) {
-          return get('app_state').then(function(legacyData) {
+          return get('app_state').then(function (legacyData) {
             if (legacyData) {
               set(key, legacyData);
               return legacyData;
@@ -170,16 +170,16 @@
     }
 
     function loadAllProfilesState() {
-      return getProfiles().then(function(profiles) {
+      return getProfiles().then(function (profiles) {
         // ハードコードされた店舗は強制読み込みせず、登録されているプロファイルを基準に取得
         const set = new Set();
-        (profiles || []).forEach(function(p) {
+        (profiles || []).forEach(function (p) {
           if (p && typeof p === 'string' && p.trim()) set.add(p.trim());
         });
         const targetList = Array.from(set);
 
-        const promises = targetList.map(function(pName) {
-          return loadProfileState(pName).then(function(state) {
+        const promises = targetList.map(function (pName) {
+          return loadProfileState(pName).then(function (state) {
             return { profileName: pName, state: state };
           });
         });
@@ -189,8 +189,8 @@
 
     function clearAllStoresData() {
       // 1. IndexedDB内の全キーを走査し、PROFILES_KEY以外のすべての売上データを完全削除
-      const dbPromise = openDB().then(function(db) {
-        return new Promise(function(resolve) {
+      const dbPromise = openDB().then(function (db) {
+        return new Promise(function (resolve) {
           try {
             const tx = db.transaction(STORE_NAME, 'readwrite');
             const store = tx.objectStore(STORE_NAME);
@@ -198,9 +198,9 @@
             // getAllKeys が利用可能な場合は一括キー取得して削除
             if (typeof store.getAllKeys === 'function') {
               const req = store.getAllKeys();
-              req.onsuccess = function() {
+              req.onsuccess = function () {
                 const keys = req.result || [];
-                keys.forEach(function(k) {
+                keys.forEach(function (k) {
                   // PROFILES_KEY（店舗名リスト）のみ保護し、それ以外の全売上キャッシュ・データを完全消去
                   if (k !== PROFILES_KEY) {
                     store.delete(k);
@@ -209,7 +209,7 @@
               };
             } else if (typeof store.openCursor === 'function') {
               const cursorReq = store.openCursor();
-              cursorReq.onsuccess = function(e) {
+              cursorReq.onsuccess = function (e) {
                 const cursor = e.target.result;
                 if (cursor) {
                   if (cursor.key !== PROFILES_KEY) {
@@ -220,18 +220,18 @@
               };
             }
 
-            tx.oncomplete = function() { resolve(); };
-            tx.onerror = function(e) {
+            tx.oncomplete = function () { resolve(); };
+            tx.onerror = function (e) {
               console.warn('[AppStorage] IndexedDB clear tx error:', e);
               resolve();
             };
-            tx.onabort = function() { resolve(); };
+            tx.onabort = function () { resolve(); };
           } catch (ex) {
             console.warn('[AppStorage] clearAllStoresData tx failed:', ex);
             resolve();
           }
         });
-      }).catch(function(err) {
+      }).catch(function (err) {
         console.warn('[AppStorage] openDB failed during clearAllStoresData:', err);
       });
 
@@ -248,7 +248,7 @@
               }
             }
           }
-          keysToRemove.forEach(function(k) { localStorage.removeItem(k); });
+          keysToRemove.forEach(function (k) { localStorage.removeItem(k); });
         }
       } catch (e) {
         console.warn('[AppStorage] clear localStorage failed:', e);
@@ -328,7 +328,7 @@
       delete cacheObj.stores[oldName];
     }
     if (Array.isArray(cacheObj.storeNames)) {
-      cacheObj.storeNames = cacheObj.storeNames.map(function(n) {
+      cacheObj.storeNames = cacheObj.storeNames.map(function (n) {
         return n === oldName ? newName : n;
       });
     }
@@ -340,7 +340,7 @@
       delete cacheObj.stores[targetName];
       if (global.SalesParser && typeof global.SalesParser.matchStoreName === 'function') {
         const targetIsAll = isAllStoreLabel(targetName);
-        Object.keys(cacheObj.stores).forEach(function(k) {
+        Object.keys(cacheObj.stores).forEach(function (k) {
           if (isAllStoreLabel(k) === targetIsAll && global.SalesParser.matchStoreName(k, [targetName]) === targetName) {
             delete cacheObj.stores[k];
           }
@@ -348,7 +348,7 @@
       }
     }
     if (Array.isArray(cacheObj.storeNames)) {
-      cacheObj.storeNames = cacheObj.storeNames.filter(function(n) {
+      cacheObj.storeNames = cacheObj.storeNames.filter(function (n) {
         if (n === targetName) return false;
         if (global.SalesParser && typeof global.SalesParser.matchStoreName === 'function') {
           if (isAllStoreLabel(n) === isAllStoreLabel(targetName) && global.SalesParser.matchStoreName(n, [targetName]) === targetName) {
@@ -360,7 +360,7 @@
     }
   }
 
-  document.addEventListener('DOMContentLoaded', function() {
+  document.addEventListener('DOMContentLoaded', function () {
     initApp();
   });
 
@@ -374,8 +374,12 @@
       cacheVersion: CURRENT_CACHE_VERSION,
       baseDataSet: baseDataSet,
       baseFileName: baseFileName,
+      basePeriodInfo: (baseDataSet && baseDataSet.periodInfo) ? baseDataSet.periodInfo : null,
+      baseStoreName: (baseDataSet && baseDataSet.storeName) ? baseDataSet.storeName : currentProfile,
       compareDataSet: compareDataSet,
       compareFileName: compareFileName,
+      comparePeriodInfo: (compareDataSet && compareDataSet.periodInfo) ? compareDataSet.periodInfo : null,
+      compareStoreName: (compareDataSet && compareDataSet.storeName) ? compareDataSet.storeName : currentProfile,
       comparisonMode: comparisonMode,
       savedAt: Date.now()
     });
@@ -389,7 +393,7 @@
   function isDataSetHealthy(dataSet) {
     if (!Array.isArray(dataSet) || dataSet.length === 0) return true;
     // 最初の営業日がDay 2以降で、かつ月次30日データ等の場合に1日欠損と判定
-    const minDay = dataSet.reduce(function(min, item) { return Math.min(min, item.Day || 99); }, 99);
+    const minDay = dataSet.reduce(function (min, item) { return Math.min(min, item.Day || 99); }, 99);
     if (minDay === 2 && dataSet.length >= 20) {
       return false; // 1日がスキップされていた旧キャッシュ
     }
@@ -400,7 +404,7 @@
    * 起動時および店舗切り替え時に保存済みデータを復元
    */
   function restorePersistedData() {
-    return AppStorage.loadProfileState(currentProfile).then(function(state) {
+    return AppStorage.loadProfileState(currentProfile).then(function (state) {
       if (!state) {
         clearDashboardUI();
         return;
@@ -422,6 +426,15 @@
       if (state.baseDataSet) {
         baseDataSet = state.baseDataSet;
         baseFileName = state.baseFileName || '';
+        if (!baseDataSet.periodInfo) {
+          baseDataSet.periodInfo = state.basePeriodInfo ||
+            (global.SalesParser && typeof global.SalesParser.extractPeriodInfo === 'function'
+              ? global.SalesParser.extractPeriodInfo([], baseFileName)
+              : { year: null, month: null, dateKey: 0, label: '期間未特定' });
+        }
+        if (!baseDataSet.storeName) {
+          baseDataSet.storeName = state.baseStoreName || currentProfile || '全店舗';
+        }
         restored = true;
       } else {
         baseDataSet = null;
@@ -430,6 +443,15 @@
       if (state.compareDataSet) {
         compareDataSet = state.compareDataSet;
         compareFileName = state.compareFileName || '';
+        if (!compareDataSet.periodInfo) {
+          compareDataSet.periodInfo = state.comparePeriodInfo ||
+            (global.SalesParser && typeof global.SalesParser.extractPeriodInfo === 'function'
+              ? global.SalesParser.extractPeriodInfo([], compareFileName)
+              : { year: null, month: null, dateKey: 0, label: '期間未特定' });
+        }
+        if (!compareDataSet.storeName) {
+          compareDataSet.storeName = state.compareStoreName || currentProfile || '全店舗';
+        }
         restored = true;
       } else {
         compareDataSet = null;
@@ -460,7 +482,7 @@
       } else {
         clearDashboardUI();
       }
-    }).catch(function(err) {
+    }).catch(function (err) {
       console.warn('[restorePersistedData] error:', err);
     });
   }
@@ -475,7 +497,7 @@
     // テーマ切り替えボタン
     const btnThemeToggle = document.getElementById('btn-theme-toggle');
     if (btnThemeToggle) {
-      btnThemeToggle.addEventListener('click', function() {
+      btnThemeToggle.addEventListener('click', function () {
         toggleTheme();
       });
     }
@@ -484,12 +506,12 @@
     const btnModeDate = document.getElementById('btn-mode-date');
     const btnModeWeekday = document.getElementById('btn-mode-weekday');
     if (btnModeDate) {
-      btnModeDate.addEventListener('click', function() {
+      btnModeDate.addEventListener('click', function () {
         setComparisonMode('date');
       });
     }
     if (btnModeWeekday) {
-      btnModeWeekday.addEventListener('click', function() {
+      btnModeWeekday.addEventListener('click', function () {
         setComparisonMode('weekday');
       });
     }
@@ -498,30 +520,30 @@
     const btnViewSingle = document.getElementById('btn-view-single');
     const btnViewKanban = document.getElementById('btn-view-kanban');
     if (btnViewSingle) {
-      btnViewSingle.addEventListener('click', function() {
+      btnViewSingle.addEventListener('click', function () {
         switchViewMode('single');
       });
     }
     if (btnViewKanban) {
-      btnViewKanban.addEventListener('click', function() {
+      btnViewKanban.addEventListener('click', function () {
         switchViewMode('kanban');
       });
     }
 
     // 基準データ用コントロール
-    setupDropZone('drop-zone-base', 'file-input-base', function(file) {
+    setupDropZone('drop-zone-base', 'file-input-base', function (file) {
       handleFileSelected(file, 'base');
     });
 
     // 比較日データ用コントロール
-    setupDropZone('drop-zone-compare', 'file-input-compare', function(file) {
+    setupDropZone('drop-zone-compare', 'file-input-compare', function (file) {
       handleFileSelected(file, 'compare');
     });
 
     // PNG保存ボタン
     const btnExportPng = document.getElementById('btn-export-png');
     if (btnExportPng) {
-      btnExportPng.addEventListener('click', function() {
+      btnExportPng.addEventListener('click', function () {
         if (!compareDataSet && !baseDataSet) {
           showStatusMessage('エクスポートするデータがありません。Excelファイルをアップロードしてください。', 'error');
           return;
@@ -547,7 +569,7 @@
     // データ詳細テーブルの表示切り替え
     const btnToggleTable = document.getElementById('btn-toggle-table');
     if (btnToggleTable) {
-      btnToggleTable.addEventListener('click', function() {
+      btnToggleTable.addEventListener('click', function () {
         if (!compareDataSet && !baseDataSet) {
           showStatusMessage('表示するデータがありません。先にExcelファイルをアップロードしてください。', 'info');
           return;
@@ -569,12 +591,12 @@
     const btnTableTabDaily = document.getElementById('btn-table-tab-daily');
     const btnTableTabWeekday = document.getElementById('btn-table-tab-weekday');
     if (btnTableTabDaily) {
-      btnTableTabDaily.addEventListener('click', function() {
+      btnTableTabDaily.addEventListener('click', function () {
         setTableTab('daily');
       });
     }
     if (btnTableTabWeekday) {
-      btnTableTabWeekday.addEventListener('click', function() {
+      btnTableTabWeekday.addEventListener('click', function () {
         setTableTab('weekday');
       });
     }
@@ -582,7 +604,7 @@
     // 全店舗データ一括削除ボタン（モーダル確認ダイアログを開く）
     const btnResetData = document.getElementById('btn-reset-data');
     if (btnResetData) {
-      btnResetData.addEventListener('click', function() {
+      btnResetData.addEventListener('click', function () {
         openResetConfirmDialog();
       });
     }
@@ -592,13 +614,13 @@
     // ファイル名ピルをクリックで個別即削除 (確認不要)
     const pillBase = document.getElementById('file-name-base');
     if (pillBase) {
-      pillBase.addEventListener('click', function() {
+      pillBase.addEventListener('click', function () {
         removeBaseFile();
       });
     }
     const pillCompare = document.getElementById('file-name-compare');
     if (pillCompare) {
-      pillCompare.addEventListener('click', function() {
+      pillCompare.addEventListener('click', function () {
         removeCompareFile();
       });
     }
@@ -670,7 +692,7 @@
       select.removeChild(select.firstChild);
     }
 
-    storeProfiles.forEach(function(p) {
+    storeProfiles.forEach(function (p) {
       const opt = document.createElement('option');
       opt.value = p;
       opt.textContent = p;
@@ -685,7 +707,7 @@
     if (!targetProfile || targetProfile === currentProfile) return;
 
     if (pendingBulkSavePromise) {
-      try { await pendingBulkSavePromise; } catch (e) {}
+      try { await pendingBulkSavePromise; } catch (e) { }
     }
 
     // 現在の店舗データを保存
@@ -715,28 +737,28 @@
   function setupProfileEvents() {
     const select = document.getElementById('select-store-profile');
     if (select) {
-      select.addEventListener('change', function(e) {
+      select.addEventListener('change', function (e) {
         switchProfile(e.target.value);
       });
     }
 
     const btnAdd = document.getElementById('btn-add-store-profile');
     if (btnAdd) {
-      btnAdd.addEventListener('click', function() {
+      btnAdd.addEventListener('click', function () {
         openProfileDialog('add');
       });
     }
 
     const btnRename = document.getElementById('btn-rename-store-profile');
     if (btnRename) {
-      btnRename.addEventListener('click', function() {
+      btnRename.addEventListener('click', function () {
         openProfileDialog('rename');
       });
     }
 
     const btnDelete = document.getElementById('btn-delete-store-profile');
     if (btnDelete) {
-      btnDelete.addEventListener('click', function() {
+      btnDelete.addEventListener('click', function () {
         openDeleteProfileDialog();
       });
     }
@@ -752,7 +774,7 @@
     if (btnSave) btnSave.addEventListener('click', saveProfileFromDialog);
 
     if (inputName) {
-      inputName.addEventListener('keydown', function(e) {
+      inputName.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') {
           e.preventDefault();
           saveProfileFromDialog();
@@ -781,7 +803,7 @@
     if (btnConfirmReset) btnConfirmReset.addEventListener('click', executeResetAllStoresData);
 
     // URLハッシュの手動変更・別タブ同期
-    window.addEventListener('hashchange', function() {
+    window.addEventListener('hashchange', function () {
       const hashStore = getHashProfile();
       if (hashStore && hashStore !== currentProfile) {
         if (!storeProfiles.includes(hashStore)) {
@@ -983,7 +1005,7 @@
     deleteStoreFromMemoryCache(compareAllStores, targetName);
 
     // 店舗プロファイルリストから除外
-    storeProfiles = storeProfiles.filter(function(p) { return p !== targetName; });
+    storeProfiles = storeProfiles.filter(function (p) { return p !== targetName; });
     await AppStorage.saveProfiles(storeProfiles);
 
     // 次の店舗プロファイルに切り替え
@@ -1190,7 +1212,7 @@
     const fileInput = document.getElementById(fileInputId);
 
     if (fileInput) {
-      fileInput.addEventListener('change', function(e) {
+      fileInput.addEventListener('change', function (e) {
         const file = e.target.files && e.target.files[0];
         if (file) {
           onSelectCallback(file);
@@ -1200,23 +1222,23 @@
     }
 
     if (dropZone) {
-      ['dragenter', 'dragover'].forEach(function(eventName) {
-        dropZone.addEventListener(eventName, function(e) {
+      ['dragenter', 'dragover'].forEach(function (eventName) {
+        dropZone.addEventListener(eventName, function (e) {
           e.preventDefault();
           e.stopPropagation();
           dropZone.classList.add('drag-over');
         });
       });
 
-      ['dragleave', 'drop'].forEach(function(eventName) {
-        dropZone.addEventListener(eventName, function(e) {
+      ['dragleave', 'drop'].forEach(function (eventName) {
+        dropZone.addEventListener(eventName, function (e) {
           e.preventDefault();
           e.stopPropagation();
           dropZone.classList.remove('drag-over');
         });
       });
 
-      dropZone.addEventListener('drop', function(e) {
+      dropZone.addEventListener('drop', function (e) {
         const dt = e.dataTransfer;
         const file = dt && dt.files && dt.files[0];
         if (file) {
@@ -1224,7 +1246,7 @@
         }
       });
 
-      dropZone.addEventListener('keydown', function(e) {
+      dropZone.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           if (fileInput) fileInput.click();
@@ -1262,16 +1284,16 @@
     showStatusMessage(slotLabel + 'を解析中: ' + fileName + ' ...', 'info');
 
     const reader = new FileReader();
-    reader.onerror = function() {
+    reader.onerror = function () {
       showStatusMessage('ファイルの読み込み中にI/Oエラーが発生しました。破損またはアクセス権限を確認してください。', 'error');
     };
-    reader.onload = function(e) {
+    reader.onload = function (e) {
       try {
         const buffer = e.target.result;
         const allStoresParsed = global.SalesParser.parseAllStoreSheets(buffer, fileName, storeProfiles, currentProfile);
         const singleParsed = getStoreDataFromMultiSheetCache(allStoresParsed, currentProfile) ||
-                             getStoreDataFromMultiSheetCache(allStoresParsed, '全店') ||
-                             global.SalesParser.parseSalesExcel(buffer, fileName, currentProfile);
+          getStoreDataFromMultiSheetCache(allStoresParsed, '全店') ||
+          global.SalesParser.parseSalesExcel(buffer, fileName, currentProfile);
 
         if (!singleParsed || singleParsed.length === 0) {
           showStatusMessage('有効な売上データが見つかりませんでした。フォーマットを確認してください。', 'error');
@@ -1312,7 +1334,7 @@
         // 店舗プロファイルリストの自動拡張（既存登録店舗との表記ゆれ名寄せを行い、重複プロファイル増殖を防止）
         if (allStoresParsed.storeNames && allStoresParsed.storeNames.length > 0) {
           let profilesChanged = false;
-          allStoresParsed.storeNames.forEach(function(sName) {
+          allStoresParsed.storeNames.forEach(function (sName) {
             if (!sName || typeof sName !== 'string') return;
             const trimmed = sName.trim();
             if (!trimmed) return;
@@ -1350,17 +1372,17 @@
         const storesToSync = new Set();
         if (swapped) {
           if (baseAllStores && Array.isArray(baseAllStores.storeNames)) {
-            baseAllStores.storeNames.forEach(function(n) { storesToSync.add(n); });
+            baseAllStores.storeNames.forEach(function (n) { storesToSync.add(n); });
           }
           if (compareAllStores && Array.isArray(compareAllStores.storeNames)) {
-            compareAllStores.storeNames.forEach(function(n) { storesToSync.add(n); });
+            compareAllStores.storeNames.forEach(function (n) { storesToSync.add(n); });
           }
         } else if (allStoresParsed.storeNames) {
-          allStoresParsed.storeNames.forEach(function(n) { storesToSync.add(n); });
+          allStoresParsed.storeNames.forEach(function (n) { storesToSync.add(n); });
         }
 
         const saveTasks = [];
-        storesToSync.forEach(function(rawStoreName) {
+        storesToSync.forEach(function (rawStoreName) {
           const matched = (global.SalesParser && typeof global.SalesParser.matchStoreName === 'function')
             ? global.SalesParser.matchStoreName(rawStoreName, storeProfiles)
             : null;
@@ -1374,18 +1396,22 @@
             : (targetSlot === 'compare' ? getStoreDataFromMultiSheetCache(allStoresParsed, canonicalName) : null);
 
           if ((bData && bData.length > 0) || (cData && cData.length > 0)) {
-            const task = AppStorage.loadProfileState(canonicalName).then(function(prevState) {
+            const task = AppStorage.loadProfileState(canonicalName).then(function (prevState) {
               const updated = (prevState && prevState.cacheVersion === CURRENT_CACHE_VERSION) ? prevState : {};
               updated.cacheVersion = CURRENT_CACHE_VERSION;
               if (bData && bData.length > 0) {
                 ensureWeekdayData(bData, baseFileName);
                 updated.baseDataSet = bData;
                 updated.baseFileName = baseFileName;
+                updated.basePeriodInfo = bData.periodInfo || null;
+                updated.baseStoreName = bData.storeName || canonicalName;
               }
               if (cData && cData.length > 0) {
                 ensureWeekdayData(cData, compareFileName);
                 updated.compareDataSet = cData;
                 updated.compareFileName = compareFileName;
+                updated.comparePeriodInfo = cData.periodInfo || null;
+                updated.compareStoreName = cData.storeName || canonicalName;
               }
               updated.comparisonMode = comparisonMode;
               updated.savedAt = Date.now();
@@ -1395,13 +1421,13 @@
           }
         });
         saveTasks.push(saveCurrentProfileState());
-        pendingBulkSavePromise = Promise.all(saveTasks).catch(function(err) {
+        pendingBulkSavePromise = Promise.all(saveTasks).catch(function (err) {
           console.warn('[handleFileSelected] bulk save error:', err);
         });
 
         // 表示ビューに応じたレンダリング
         if (currentViewMode === 'kanban') {
-          pendingBulkSavePromise.then(function() {
+          pendingBulkSavePromise.then(function () {
             if (currentViewMode === 'kanban') {
               renderKanbanView();
             }
@@ -1425,7 +1451,7 @@
       }
     };
 
-    reader.onerror = function() {
+    reader.onerror = function () {
       showStatusMessage('ファイルの読み込み中にエラーが発生しました。', 'error');
     };
 
@@ -1542,7 +1568,7 @@
     isSwitchingStore = true;
     try {
       if (pendingBulkSavePromise) {
-        try { await pendingBulkSavePromise; } catch (e) {}
+        try { await pendingBulkSavePromise; } catch (e) { }
       }
 
       // 既存店舗プロファイルへの動的照合（追加・名称変更・削除に完全連動）
@@ -1643,7 +1669,7 @@
     try {
       const allPersisted = await AppStorage.loadAllProfilesState();
       if (Array.isArray(allPersisted)) {
-        allPersisted.forEach(function(item) {
+        allPersisted.forEach(function (item) {
           if (item && item.state) {
             const isHealthy = isDataSetHealthy(item.state.baseDataSet) && isDataSetHealthy(item.state.compareDataSet);
             const hasData = isHealthy && (
@@ -1702,7 +1728,7 @@
       if (seenStores.has(trimmed)) return;
       if (storeNames.length > 0 && global.SalesParser && typeof global.SalesParser.matchStoreName === 'function') {
         const targetIsAll = isAllStoreLabel(trimmed);
-        const sameCategoryCandidates = storeNames.filter(function(s) {
+        const sameCategoryCandidates = storeNames.filter(function (s) {
           return isAllStoreLabel(s) === targetIsAll;
         });
         if (sameCategoryCandidates.length > 0) {
@@ -1718,21 +1744,21 @@
 
     // 1. ユーザーが追加した店舗プロファイルを「追加された順番」で最優先に登録
     if (Array.isArray(storeProfiles)) {
-      storeProfiles.forEach(function(p) {
+      storeProfiles.forEach(function (p) {
         addStore(p);
       });
     }
 
     // 2. アップロードされたファイルから検出された店舗があれば出現順に追加
     if (compareAllStores && Array.isArray(compareAllStores.storeNames)) {
-      compareAllStores.storeNames.forEach(function(s) { addStore(s); });
+      compareAllStores.storeNames.forEach(function (s) { addStore(s); });
     }
     if (baseAllStores && Array.isArray(baseAllStores.storeNames)) {
-      baseAllStores.storeNames.forEach(function(s) { addStore(s); });
+      baseAllStores.storeNames.forEach(function (s) { addStore(s); });
     }
 
     // 3. ストレージ内に保存されている店舗で未追加のものがあれば追加
-    Object.keys(persistedMap).forEach(function(k) {
+    Object.keys(persistedMap).forEach(function (k) {
       addStore(k);
     });
 
@@ -1745,7 +1771,7 @@
     let storesWithDataCount = 0;
 
     // 各店舗カードを2列カンバングリッドに生成
-    storeNames.forEach(function(storeName) {
+    storeNames.forEach(function (storeName) {
       let curData = null;
       let baseData = null;
       let curFileName = compareFileName;
@@ -1795,8 +1821,8 @@
       // 3. 現在アクティブな店舗プロファイルのメモリ上データ（storeName が現在選択店舗と一致する場合のみ限定適用）
       const isCurrentStore = (storeName === currentProfile) ||
         (isAllStoreLabel(storeName) === isAllStoreLabel(currentProfile) &&
-         global.SalesParser && typeof global.SalesParser.matchStoreName === 'function' &&
-         global.SalesParser.matchStoreName(storeName, [currentProfile]) === currentProfile);
+          global.SalesParser && typeof global.SalesParser.matchStoreName === 'function' &&
+          global.SalesParser.matchStoreName(storeName, [currentProfile]) === currentProfile);
 
       if (isCurrentStore) {
         if (!curData && compareDataSet && compareDataSet.length > 0) {
@@ -1826,12 +1852,12 @@
       card.setAttribute('title', 'クリックして「' + storeName + '」の個別店舗ビューを表示');
 
       // カードクリックで個別店舗ビューへ動的リンク遷移（ハードコード完全排除）
-      card.addEventListener('click', function() {
+      card.addEventListener('click', function () {
         selectStoreAndSwitchToSingleView(storeName);
       });
 
       // キーボードアクセシビリティ対応 (Enter / Space)
-      card.addEventListener('keydown', function(e) {
+      card.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           selectStoreAndSwitchToSingleView(storeName);
@@ -1885,14 +1911,14 @@
       let activeDaysCount = 0;
 
       if (curData && curData.length > 0 && baseData && baseData.length > 0 &&
-          global.SalesChart && typeof global.SalesChart.buildComparisonPairs === 'function') {
+        global.SalesChart && typeof global.SalesChart.buildComparisonPairs === 'function') {
         const storePairs = global.SalesChart.buildComparisonPairs(curData, baseData, comparisonMode);
         let pairCurSales = 0;
         let pairBaseSales = 0;
         let pairCurCount = 0;
         let pairBaseCount = 0;
 
-        storePairs.forEach(function(p) {
+        storePairs.forEach(function (p) {
           const c = p.curItem;
           const b = p.baseItem;
           const cSales = c ? (c['売上'] || 0) : 0;
@@ -1921,7 +1947,7 @@
         badge.className = 'kanban-stat-badge badge-neutral';
 
         if (typeof curVal === 'number' && Number.isFinite(curVal) &&
-            typeof baseVal === 'number' && Number.isFinite(baseVal) && baseVal > 0) {
+          typeof baseVal === 'number' && Number.isFinite(baseVal) && baseVal > 0) {
           const ratioVal = (curVal / baseVal) * 100;
           if (Number.isFinite(ratioVal)) {
             const diff = curVal - baseVal;
@@ -1982,7 +2008,7 @@
       kanbanGrid.appendChild(card);
 
       // グラフ領域（ラッパー・Canvas・Chart.js onClick）クリックによる個別店舗ビューへの動的リンク遷移
-      const handleStoreSelect = function(e) {
+      const handleStoreSelect = function (e) {
         if (e) e.stopPropagation();
         selectStoreAndSwitchToSingleView(storeName);
       };
@@ -1990,7 +2016,7 @@
       canvas.addEventListener('click', handleStoreSelect);
 
       // チャート描画
-      global.SalesChart.renderKanbanChart(canvas, curData, baseData, comparisonMode, function() {
+      global.SalesChart.renderKanbanChart(canvas, curData, baseData, comparisonMode, function () {
         selectStoreAndSwitchToSingleView(storeName);
       });
     });
@@ -2033,7 +2059,7 @@
    */
   function ensureWeekdayData(dataSet, fileName) {
     if (!Array.isArray(dataSet) || dataSet.length === 0) return;
-    const hasDow = dataSet.some(function(d) { return d.dayOfWeek !== null && d.dayOfWeek !== undefined; });
+    const hasDow = dataSet.some(function (d) { return d.dayOfWeek !== null && d.dayOfWeek !== undefined; });
     if (hasDow) return;
 
     let y = dataSet.periodInfo && dataSet.periodInfo.year;
@@ -2045,7 +2071,7 @@
     }
 
     const WEEKDAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'];
-    dataSet.forEach(function(item) {
+    dataSet.forEach(function (item) {
       if (y && m) {
         const dt = new Date(y, m - 1, item.Day);
         if (!isNaN(dt.getTime())) {
@@ -2082,7 +2108,7 @@
     let baseMinDay = null, baseMaxDay = null;
 
     if (Array.isArray(pairs)) {
-      pairs.forEach(function(p) {
+      pairs.forEach(function (p) {
         const c = p.curItem;
         const b = p.baseItem;
         if (c && ((c['売上'] || 0) > 0 || (c['客数'] || 0) > 0)) {
@@ -2181,7 +2207,7 @@
       return;
     }
     updateDashboardView();
-    saveCurrentProfileState().then(function() {
+    saveCurrentProfileState().then(function () {
       if (currentViewMode === 'kanban') renderKanbanView();
     });
     showStatusMessage('基準データを削除しました。', 'info');
@@ -2205,7 +2231,7 @@
       return;
     }
     updateDashboardView();
-    saveCurrentProfileState().then(function() {
+    saveCurrentProfileState().then(function () {
       if (currentViewMode === 'kanban') renderKanbanView();
     });
     showStatusMessage('比較日データを削除しました。', 'info');
@@ -2226,7 +2252,7 @@
 
     if (!datasetsInfo || datasetsInfo.length === 0) return;
 
-    datasetsInfo.forEach(function(info) {
+    datasetsInfo.forEach(function (info) {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'metric-chip chip-' + info.metricType + (info.isBase ? ' chip-base' : ' chip-cur');
@@ -2234,7 +2260,7 @@
       chip.setAttribute('aria-pressed', info.hidden ? 'false' : 'true');
       chip.textContent = info.label;
 
-      chip.addEventListener('click', function() {
+      chip.addEventListener('click', function () {
         const isActive = global.SalesChart.toggleDataset(info.key);
         chip.setAttribute('aria-pressed', isActive ? 'true' : 'false');
       });
@@ -2367,16 +2393,68 @@
   }
 
   /**
-   * ファイル名ピル要素の表示・内容更新
+   * データセットから表示用の対象期間ラベルと店舗名ラベルを安全に構築
+   * @param {Array} dataSet
+   * @param {string} fileName
+   * @returns {{ periodLabel: string, storeLabel: string }}
+   */
+  function resolveFilePillLabels(dataSet, fileName) {
+    let pInfo = dataSet && dataSet.periodInfo;
+    if ((!pInfo || (!pInfo.year && !pInfo.label)) && global.SalesParser && typeof global.SalesParser.extractPeriodInfo === 'function') {
+      pInfo = global.SalesParser.extractPeriodInfo([], fileName || '');
+    }
+
+    let minDay = null;
+    let maxDay = null;
+    if (Array.isArray(dataSet) && dataSet.length > 0) {
+      dataSet.forEach(function (item) {
+        if (!item || typeof item.Day !== 'number') return;
+        if ((item['売上'] || 0) > 0 || (item['客数'] || 0) > 0) {
+          if (minDay === null || item.Day < minDay) minDay = item.Day;
+          if (maxDay === null || item.Day > maxDay) maxDay = item.Day;
+        }
+      });
+      if (minDay === null) {
+        minDay = dataSet[0].Day;
+        maxDay = dataSet[dataSet.length - 1].Day;
+      }
+    }
+
+    let periodLabel = '';
+    if (pInfo && pInfo.year && pInfo.month) {
+      if (minDay !== null && maxDay !== null) {
+        periodLabel = (minDay === maxDay)
+          ? (pInfo.year + '年' + pInfo.month + '月' + minDay + '日')
+          : (pInfo.year + '年' + pInfo.month + '月' + minDay + '日〜' + maxDay + '日');
+      } else {
+        periodLabel = pInfo.year + '年' + pInfo.month + '月';
+      }
+    } else if (pInfo && pInfo.label) {
+      periodLabel = pInfo.label;
+    } else {
+      periodLabel = '期間未特定';
+    }
+
+    const rawStore = (dataSet && dataSet.storeName && String(dataSet.storeName).trim()) || currentProfile || '全店舗';
+    const storeLabel = isAllStoreLabel(rawStore) ? '全店舗' : rawStore;
+
+    return {
+      periodLabel: periodLabel,
+      storeLabel: storeLabel
+    };
+  }
+
+  /**
+   * ファイルピル要素の表示・内容更新（対象期間と店舗名を表示）
    */
   function updateFilePill(pillId, dataSet, fileName, prefix) {
     const el = document.getElementById(pillId);
     if (!el) return;
 
-    if (dataSet && fileName) {
-      const periodLabel = dataSet.periodInfo && dataSet.periodInfo.label ? ' [' + dataSet.periodInfo.label + ']' : '';
-      el.textContent = prefix + ': ' + fileName + periodLabel;
-      el.setAttribute('title', 'クリックして ' + prefix + ' を即時削除\n' + fileName);
+    if (dataSet && (fileName || dataSet.length > 0)) {
+      const labels = resolveFilePillLabels(dataSet, fileName);
+      el.textContent = prefix + ': ' + labels.periodLabel + ' ' + labels.storeLabel;
+      el.setAttribute('title', 'クリックして ' + prefix + ' を即時削除\n' + (fileName || ''));
       el.classList.remove('hidden');
     } else {
       el.removeAttribute('title');
@@ -2416,7 +2494,7 @@
       let matchedDays = 0;
 
       if (Array.isArray(pairs)) {
-        pairs.forEach(function(p) {
+        pairs.forEach(function (p) {
           const c = p.curItem;
           const b = p.baseItem;
 
@@ -2483,7 +2561,7 @@
     let totalCustomers = 0;
     let validDays = 0;
 
-    dataList.forEach(function(item) {
+    dataList.forEach(function (item) {
       const sales = item['売上'] || 0;
       const count = item['客数'] || 0;
       if (sales > 0 || count > 0) {
@@ -2568,7 +2646,7 @@
     let sumCurSales = 0, sumBaseSales = 0;
     let sumCurCount = 0, sumBaseCount = 0;
 
-    pairs.forEach(function(pair) {
+    pairs.forEach(function (pair) {
       const curItem = pair.curItem;
       const baseItem = pair.baseItem;
       const curSales = curItem ? (curItem['売上'] || 0) : 0;
@@ -2709,7 +2787,7 @@
     }
 
     // 合計行をスクロール時にカラム行の直下に完全に固定する設定
-    Array.from(trTotal.children).forEach(function(td) {
+    Array.from(trTotal.children).forEach(function (td) {
       td.style.position = 'sticky';
       td.style.top = '46px'; // ヘッダーの固定高さと完全に一致させる（ジャンプ防止）
       td.style.zIndex = '9'; // ヘッダー(10)の下、通常セルより上
@@ -2718,7 +2796,7 @@
       td.style.backgroundClip = 'padding-box';
     });
 
-    pairs.forEach(function(pair) {
+    pairs.forEach(function (pair) {
       const curItem = pair.curItem;
       const baseItem = pair.baseItem;
 
@@ -2734,7 +2812,7 @@
       // 日付 (日付 + 曜日バッジ)
       const tdDay = document.createElement('td');
       tdDay.className = 'text-center font-medium';
-      
+
       const daySpan = document.createElement('span');
       daySpan.textContent = pair.day + '日';
       tdDay.appendChild(daySpan);
@@ -2794,19 +2872,19 @@
       if (mode === 'weekday' && baseItem) {
         tdBaseCount.title = '対比対象(昨年): ' + pair.baseLabel;
       }
-              tr.appendChild(tdBaseCount);
+      tr.appendChild(tdBaseCount);
 
-        // 客数差分
-        const tdCountDiff = document.createElement('td');
-        if (curCount > 0 && baseCount > 0) {
-          const countDiffVal = curCount - baseCount;
-          tdCountDiff.textContent = (countDiffVal > 0 ? '+' : '') + countDiffVal.toLocaleString() + ' 人';
-          tdCountDiff.className = 'text-right ' + (countDiffVal >= 0 ? 'text-diff-up' : 'text-diff-down');
-        } else {
-          tdCountDiff.textContent = '-';
-          tdCountDiff.className = 'text-right text-diff-neutral';
-        }
-        tr.appendChild(tdCountDiff);
+      // 客数差分
+      const tdCountDiff = document.createElement('td');
+      if (curCount > 0 && baseCount > 0) {
+        const countDiffVal = curCount - baseCount;
+        tdCountDiff.textContent = (countDiffVal > 0 ? '+' : '') + countDiffVal.toLocaleString() + ' 人';
+        tdCountDiff.className = 'text-right ' + (countDiffVal >= 0 ? 'text-diff-up' : 'text-diff-down');
+      } else {
+        tdCountDiff.textContent = '-';
+        tdCountDiff.className = 'text-right text-diff-neutral';
+      }
+      tr.appendChild(tdCountDiff);
 
       // 客数前年比
       const tdCountRatio = document.createElement('td');
@@ -2835,19 +2913,19 @@
       if (mode === 'weekday' && baseItem) {
         tdBasePrice.title = '対比対象(昨年): ' + pair.baseLabel;
       }
-              tr.appendChild(tdBasePrice);
+      tr.appendChild(tdBasePrice);
 
-        // 単価差分
-        const tdPriceDiff = document.createElement('td');
-        if (curPrice > 0 && basePrice > 0) {
-          const priceDiffVal = curPrice - basePrice;
-          tdPriceDiff.textContent = (priceDiffVal > 0 ? '+¥' : '-¥') + Math.abs(priceDiffVal).toLocaleString();
-          tdPriceDiff.className = 'text-right ' + (priceDiffVal >= 0 ? 'text-diff-up' : 'text-diff-down');
-        } else {
-          tdPriceDiff.textContent = '-';
-          tdPriceDiff.className = 'text-right text-diff-neutral';
-        }
-        tr.appendChild(tdPriceDiff);
+      // 単価差分
+      const tdPriceDiff = document.createElement('td');
+      if (curPrice > 0 && basePrice > 0) {
+        const priceDiffVal = curPrice - basePrice;
+        tdPriceDiff.textContent = (priceDiffVal > 0 ? '+¥' : '-¥') + Math.abs(priceDiffVal).toLocaleString();
+        tdPriceDiff.className = 'text-right ' + (priceDiffVal >= 0 ? 'text-diff-up' : 'text-diff-down');
+      } else {
+        tdPriceDiff.textContent = '-';
+        tdPriceDiff.className = 'text-right text-diff-neutral';
+      }
+      tr.appendChild(tdPriceDiff);
 
       // 客単価前年比
       const tdPriceRatio = document.createElement('td');
@@ -2938,7 +3016,7 @@
     let totalPriceDiff = 0, totalHasPriceDiff = false;
     let totalPriceRatioSum = 0, totalPriceRatioCount = 0;
 
-    pairs.forEach(function(pair) {
+    pairs.forEach(function (pair) {
       const dow = resolvePairDow(pair);
       if (dow === null || dow < 0 || dow > 6) return;
       const b = buckets[dow];
@@ -3159,7 +3237,7 @@
     // ヘッダー行の高さを明示的に固定し、透過ボーダーによる文字透けを完全に防ぐ
     const theadRow = document.getElementById('table-header-row');
     if (theadRow) {
-      Array.from(theadRow.children).forEach(function(th) {
+      Array.from(theadRow.children).forEach(function (th) {
         th.style.height = '46px';
         th.style.boxSizing = 'border-box';
         th.style.borderBottom = 'none';
@@ -3168,7 +3246,7 @@
     }
 
     // 合計行をスクロール時にカラム行の直下に完全に固定する設定
-    Array.from(trTotal.children).forEach(function(td) {
+    Array.from(trTotal.children).forEach(function (td) {
       td.style.position = 'sticky';
       td.style.top = '46px';
       td.style.zIndex = '9';
@@ -3178,7 +3256,7 @@
     });
 
     // 2. 各曜日の行を描画 (日〜土)
-    buckets.forEach(function(b) {
+    buckets.forEach(function (b) {
       const isInactive = b.activeDays === 0;
       const tr = document.createElement('tr');
       if (isInactive) {
@@ -3365,7 +3443,7 @@
     statusEl.classList.remove('hidden');
 
     if (type === 'success' || type === 'info') {
-      setTimeout(function() {
+      setTimeout(function () {
         if (statusEl.textContent === message) {
           statusEl.classList.add('hidden');
         }
@@ -3380,12 +3458,12 @@
     const fullscreenBtn = document.getElementById('btn-fullscreen');
     if (!fullscreenBtn) return;
 
-    fullscreenBtn.addEventListener('click', function() {
+    fullscreenBtn.addEventListener('click', function () {
       const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
       if (!isFullscreen) {
         const docEl = document.documentElement;
         if (docEl.requestFullscreen) {
-          docEl.requestFullscreen().catch(function(err) {
+          docEl.requestFullscreen().catch(function (err) {
             showStatusMessage('全画面表示への切り替えに失敗しました: ' + err.message, 'error');
           });
         } else if (docEl.webkitRequestFullscreen) {
@@ -3393,7 +3471,7 @@
         }
       } else {
         if (document.exitFullscreen) {
-          document.exitFullscreen().catch(function(err) {
+          document.exitFullscreen().catch(function (err) {
             showStatusMessage('全画面表示の解除に失敗しました: ' + err.message, 'error');
           });
         } else if (document.webkitExitFullscreen) {
